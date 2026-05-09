@@ -83,7 +83,7 @@ function construirHTML_(aviso, fechaSlash, fechaLarga, moneda) {
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                     <tr>
                       <td valign="middle" style="border-radius:6px; padding:8px 14px;">
-                        <img src="${LOGO_URL}" alt="Cualli" width="100" style="display:block; width:140px; max-width:140px; height:auto; border:0;">
+                        <img src="${LOGO_URL}" alt="Cualli" width="140" style="display:block; width:140px; max-width:140px; height:auto; border:0;">
                       </td>
                     </tr>
                   </table>
