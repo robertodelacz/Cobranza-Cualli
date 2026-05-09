@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <base target="_top">
+  <title>Cobranza Preventiva · Cualli</title>
+  <?!= include('styles'); ?>
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-mark">C</div>
+      <div class="header-titles">
+        <h1>Cobranza Preventiva</h1>
+        <p class="subtitle">Financiera Cualli · Contraloría</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="user-pill" id="userPill">
+        <span class="user-icon">●</span>
+        <span id="userEmail">cargando…</span>
+      </div>
+      <div class="date-display" id="dateDisplay">—</div>
+    </div>
+  </header>
+
+  <nav class="app-nav">
+    <a class="nav-item active" data-section="carga">
+      <span class="nav-num">01</span>
+      <span class="nav-label">Carga de Reportes</span>
+    </a>
+    <a class="nav-item" data-section="dashboard">
+      <span class="nav-num">02</span>
+      <span class="nav-label">Dashboard de Avisos</span>
+    </a>
+    <a class="nav-item" data-section="envios">
+      <span class="nav-num">03</span>
+      <span class="nav-label">Bitácora de Envíos</span>
+    </a>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECCIÓN 01 · CARGA DE REPORTES
+       ═══════════════════════════════════════════════════════════════ -->
+  <main class="app-main section-content" id="section-carga">
+
+    <section class="section-intro">
+      <div class="section-number">01</div>
+      <div class="section-text">
+        <h2>Carga de Reportes</h2>
+        <p>Sube los reportes <strong>Rep1</strong> (vencimientos del periodo) y <strong>Rep9</strong> (saldos de cartera) para alimentar al sistema.</p>
+      </div>
+    </section>
+
+    <div class="upload-grid">
+      <article class="upload-card" id="card-rep1">
+        <header class="card-header">
+          <div class="card-badge rep1-badge">REP 1</div>
+          <h3>Vencimientos del Periodo</h3>
+          <p>Reporte con los créditos que vencen en el periodo (cols A–H).</p>
+        </header>
+        <div class="dropzone" id="dropzone-rep1" data-target="rep1">
+          <div class="dropzone-content">
+            <div class="dropzone-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <p class="dropzone-text"><strong>Arrastra el archivo aquí</strong> o</p>
+            <button class="btn-browse" data-target="rep1">Seleccionar Rep1.xlsx</button>
+            <input type="file" id="file-rep1" accept=".xlsx,.xls,.XLSX,.XLS" hidden>
+            <p class="dropzone-hint">Formatos: .xlsx, .xls</p>
+          </div>
+        </div>
+        <div class="card-status" id="status-rep1"></div>
+      </article>
+
+      <article class="upload-card" id="card-rep9">
+        <header class="card-header">
+          <div class="card-badge rep9-badge">REP 9</div>
+          <h3>Saldos de Cartera</h3>
+          <p>Reporte completo de saldos por línea de crédito (30 columnas).</p>
+        </header>
+        <div class="dropzone" id="dropzone-rep9" data-target="rep9">
+          <div class="dropzone-content">
+            <div class="dropzone-icon">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <p class="dropzone-text"><strong>Arrastra el archivo aquí</strong> o</p>
+            <button class="btn-browse" data-target="rep9">Seleccionar Rep9.xlsx</button>
+            <input type="file" id="file-rep9" accept=".xlsx,.xls,.XLSX,.XLS" hidden>
+            <p class="dropzone-hint">Formatos: .xlsx, .xls</p>
+          </div>
+        </div>
+        <div class="card-status" id="status-rep9"></div>
+      </article>
+    </div>
+
+    <section class="status-panel" id="statusPanel">
+      <h3 class="status-title">
+        <span class="status-dot"></span>
+        Estado del Sistema
+      </h3>
+      <div class="status-grid">
+        <div class="status-cell">
+          <div class="status-cell-label">Último Rep1</div>
+          <div class="status-cell-value" id="lastRep1">—</div>
+          <div class="status-cell-meta" id="lastRep1Meta"></div>
+        </div>
+        <div class="status-cell">
+          <div class="status-cell-label">Último Rep9</div>
+          <div class="status-cell-value" id="lastRep9">—</div>
+          <div class="status-cell-meta" id="lastRep9Meta"></div>
+        </div>
+        <div class="status-cell">
+          <div class="status-cell-label">Catálogo de Tasas</div>
+          <div class="status-cell-value">214 contratos</div>
+          <div class="status-cell-meta">Editable en el spreadsheet maestro</div>
+        </div>
+        <div class="status-cell">
+          <div class="status-cell-label">Catálogo de Correos</div>
+          <div class="status-cell-value">217 contratos</div>
+          <div class="status-cell-meta">Editable en el spreadsheet maestro</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECCIÓN 02 · DASHBOARD DE AVISOS
+       ═══════════════════════════════════════════════════════════════ -->
+  <main class="app-main section-content" id="section-dashboard" hidden>
+
+    <section class="section-intro">
+      <div class="section-number">02</div>
+      <div class="section-text">
+        <h2>Dashboard de Avisos</h2>
+        <p>Avisos calculados con los datos cargados. Selecciona los avisos a enviar y confirma. Los moratorios del periodo se calculan sobre el capital vencido en función de los días.</p>
+      </div>
+    </section>
+
+    <div class="dashboard-toolbar">
+      <div class="toolbar-info">
+        <span class="toolbar-label">Calculando al:</span>
+        <strong id="fechaCalculo">—</strong>
+      </div>
+      <div class="toolbar-actions">
+        <label class="modo-prueba-toggle" title="Cuando está activo, todos los vencimientos futuros se tratan como T-1 enviables">
+          <input type="checkbox" id="toggleModoPrueba">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">Modo prueba</span>
+        </label>
+        <button class="btn btn-secondary btn-sm" id="btnHojaTrabajo" title="Regenera la hoja de trabajo con fórmulas tipo 'Hoja 1' del archivo viejo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <line x1="9" y1="3" x2="9" y2="21"/>
+            <line x1="3" y1="9" x2="21" y2="9"/>
+          </svg>
+          <span>Hoja_Trabajo</span>
+        </button>
+        <button class="btn btn-primary btn-sm" id="btnRecalcular">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+            <path d="M3 12a9 9 0 0114.65-7M21 12a9 9 0 01-14.65 7M21 4v5h-5M3 20v-5h5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Recalcular</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Banner de modo prueba -->
+    <div class="modo-prueba-banner" id="modoPruebaBanner" hidden>
+      <span class="banner-icon">⚠</span>
+      <div class="banner-text">
+        <strong>MODO PRUEBA ACTIVO</strong>
+        <span>Todos los vencimientos futuros (≥ mañana) se tratan como T-1 enviables. Desactiva antes de operar en producción.</span>
+      </div>
+    </div>
+
+    <div class="empty-state" id="dashEmpty">
+      <div class="empty-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="4" width="18" height="16" rx="2"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+          <line x1="9" y1="14" x2="15" y2="14"/>
+        </svg>
+      </div>
+      <h3>Aún no se han calculado avisos</h3>
+      <p>Sube los reportes en la sección 01 y luego presiona <strong>Recalcular</strong>.</p>
+    </div>
+
+    <div class="kpi-grid" id="kpiGrid" hidden>
+      <div class="kpi-card kpi-yellow">
+        <div class="kpi-label">Total a cobrar</div>
+        <div class="kpi-value" id="kpiTotal">—</div>
+        <div class="kpi-meta" id="kpiTotalMeta">—</div>
+      </div>
+      <div class="kpi-card kpi-red">
+        <div class="kpi-label">Capital vencido</div>
+        <div class="kpi-value" id="kpiCapVenc">—</div>
+        <div class="kpi-meta" id="kpiCapVencMeta">—</div>
+      </div>
+      <div class="kpi-card kpi-orange">
+        <div class="kpi-label">Moratorios</div>
+        <div class="kpi-value" id="kpiMor">—</div>
+        <div class="kpi-meta">Acumulados + del periodo</div>
+      </div>
+      <div class="kpi-card kpi-gray">
+        <div class="kpi-label">Avisos con warning</div>
+        <div class="kpi-value" id="kpiWarn">—</div>
+        <div class="kpi-meta" id="kpiWarnMeta">Sin Rep9 / sin tasa / sin correo</div>
+      </div>
+    </div>
+
+    <div class="dash-filters" id="dashFilters" hidden>
+      <div class="filter-pills" id="filterPills">
+        <button class="filter-pill active" data-filter="all">Todos</button>
+        <button class="filter-pill" data-filter="T-5">T-5</button>
+        <button class="filter-pill" data-filter="T-1">T-1</button>
+        <button class="filter-pill" data-filter="T+0">T+0</button>
+        <button class="filter-pill" data-filter="warn">Solo con warnings</button>
+      </div>
+      <input type="search" class="filter-search" id="filterSearch" placeholder="Buscar línea o cliente…">
+    </div>
+
+    <!-- Action bar de selección masiva -->
+    <div class="selection-bar" id="selectionBar" hidden>
+      <div class="selection-info">
+        <span class="selection-icon">✓</span>
+        <strong id="selectionCount">0</strong>
+        <span>aviso(s) seleccionado(s)</span>
+        <span class="selection-divider">·</span>
+        <span class="selection-amount" id="selectionAmount">$0.00</span>
+      </div>
+      <div class="selection-actions">
+        <button class="btn btn-secondary btn-sm" id="btnSelectClear">Limpiar selección</button>
+        <button class="btn btn-primary btn-sm" id="btnEnviarMasivo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Enviar seleccionados</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="table-wrap" id="tableWrap" hidden>
+      <table class="dash-table" id="dashTable">
+        <thead>
+          <tr>
+            <th class="col-check"><input type="checkbox" id="checkAll" title="Seleccionar todos"></th>
+            <th>Aviso</th>
+            <th>Vencim.</th>
+            <th>Línea</th>
+            <th>Cliente</th>
+            <th class="amount">Capital</th>
+            <th class="amount">Cap. Venc.</th>
+            <th class="amount">Moratorios</th>
+            <th class="amount">Total</th>
+            <th>Mon.</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="dashTbody"></tbody>
+      </table>
+      <div class="table-empty" id="tableEmpty" hidden>
+        Ningún aviso coincide con los filtros activos.
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECCIÓN 03 · BITÁCORA DE ENVÍOS
+       ═══════════════════════════════════════════════════════════════ -->
+  <main class="app-main section-content" id="section-envios" hidden>
+
+    <section class="section-intro">
+      <div class="section-number">03</div>
+      <div class="section-text">
+        <h2>Bitácora de Envíos</h2>
+        <p>Historial de los últimos avisos enviados. Cada registro incluye el timestamp, status (enviado / error / omitido) y el mensaje detallado.</p>
+      </div>
+    </section>
+
+    <div class="dashboard-toolbar">
+      <div class="toolbar-info">
+        <span class="toolbar-label">Mostrando últimos:</span>
+        <strong id="bitacoraCount">—</strong>
+      </div>
+      <button class="btn btn-primary btn-sm" id="btnRefreshBitacora">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+          <path d="M3 12a9 9 0 0114.65-7M21 12a9 9 0 01-14.65 7M21 4v5h-5M3 20v-5h5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Refrescar</span>
+      </button>
+    </div>
+
+    <div class="table-wrap" id="bitacoraWrap">
+      <table class="dash-table" id="bitacoraTable">
+        <thead>
+          <tr>
+            <th>Fecha y hora</th>
+            <th>Tipo</th>
+            <th>Línea</th>
+            <th>Cliente</th>
+            <th class="amount">Total</th>
+            <th>Status</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody id="bitacoraTbody"></tbody>
+      </table>
+      <div class="table-empty" id="bitacoraEmpty">
+        No hay envíos registrados todavía.
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ─── MODAL: Preview de Carga (Rep1/Rep9) ──────────────────────── -->
+  <div class="modal-overlay" id="previewModal" hidden>
+    <div class="modal-card">
+      <header class="modal-header">
+        <h3 id="previewTitle">Vista previa</h3>
+        <button class="modal-close" id="modalClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="preview-summary" id="previewSummary"></div>
+        <div class="preview-table-wrap">
+          <table class="preview-table" id="previewTable"></table>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancel">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirm">Guardar al maestro</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: Detalle del aviso ──────────────────────────────── -->
+  <div class="modal-overlay" id="detailModal" hidden>
+    <div class="modal-card modal-detail">
+      <header class="modal-header">
+        <h3 id="detailTitle">Detalle del aviso</h3>
+        <button class="modal-close" id="detailClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal-body" id="detailBody"></div>
+      <footer class="modal-footer">
+        <button class="btn btn-secondary" id="detailCloseBtn">Cerrar</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: Preview del correo ─────────────────────────────────── -->
+  <div class="modal-overlay" id="emailModal" hidden>
+    <div class="modal-card modal-email">
+      <header class="modal-header">
+        <h3 id="emailTitle">Vista previa del correo</h3>
+        <button class="modal-close" id="emailClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="email-meta" id="emailMeta"></div>
+        <div class="email-preview-wrap">
+          <iframe id="emailPreviewFrame" sandbox="allow-same-origin"></iframe>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-secondary" id="emailCloseBtn">Cerrar</button>
+        <button class="btn btn-primary" id="btnEnviarIndividual">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -2px;">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Enviar este aviso</span>
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: Confirmación de envío masivo ───────────────────────── -->
+  <div class="modal-overlay" id="confirmModal" hidden>
+    <div class="modal-card modal-confirm">
+      <header class="modal-header">
+        <h3>Confirmar envío masivo</h3>
+        <button class="modal-close" id="confirmClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal-body" id="confirmBody"></div>
+      <footer class="modal-footer">
+        <button class="btn btn-secondary" id="confirmCancelBtn">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmMasivo">
+          Sí, enviar todos
+        </button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─── MODAL: Reporte de envío ───────────────────────────────────── -->
+  <div class="modal-overlay" id="reportModal" hidden>
+    <div class="modal-card modal-report">
+      <header class="modal-header">
+        <h3>Reporte de envío</h3>
+        <button class="modal-close" id="reportClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal-body" id="reportBody"></div>
+      <footer class="modal-footer">
+        <button class="btn btn-primary" id="reportCloseBtn">Aceptar</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ─── TOAST ────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast" hidden>
+    <span class="toast-icon" id="toastIcon"></span>
+    <span class="toast-msg" id="toastMsg"></span>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <?!= include('app_js'); ?>
+
+</body>
+</html>
