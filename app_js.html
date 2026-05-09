@@ -1,0 +1,1013 @@
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   COBRANZA PREVENTIVA · FRONTEND JS · Entregable 4
+   ═══════════════════════════════════════════════════════════════════ */
+
+const state = {
+  rep1: { rows: null, validation: null },
+  rep9: { rows: null, validation: null },
+  pendingTarget: null,
+  // Dashboard
+  avisos: [],
+  stats: null,
+  fechaReporte: null,
+  warnings: [],
+  filterTipo: 'all',
+  filterSearch: '',
+  // Selección masiva
+  selected: new Set(),         // líneas seleccionadas
+  // Email modal
+  currentPreviewLinea: null,
+  // Bitácora
+  bitacora: []
+};
+
+// ─── BOOTSTRAP ────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initDateDisplay();
+  initNav();
+  initDropzones();
+  initModals();
+  initDashboard();
+  initBitacora();
+  loadInitialState();
+});
+
+function initDateDisplay() {
+  const today = new Date();
+  const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+  const txt = today.toLocaleDateString('es-MX', opts);
+  document.getElementById('dateDisplay').textContent =
+    txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+function loadInitialState() {
+  google.script.run
+    .withSuccessHandler(data => {
+      if (!data.ok) { toast(`Error inicial: ${data.error}`, 'error'); return; }
+      document.getElementById('userEmail').textContent = data.userEmail;
+      renderCacheStatus('rep1', data.rep1Status);
+      renderCacheStatus('rep9', data.rep9Status);
+    })
+    .withFailureHandler(err => toast(`No se pudo cargar el estado: ${err.message}`, 'error'))
+    .getInitialState();
+}
+
+function renderCacheStatus(target, status) {
+  const valEl = document.getElementById(target === 'rep1' ? 'lastRep1' : 'lastRep9');
+  const metaEl = document.getElementById(target === 'rep1' ? 'lastRep1Meta' : 'lastRep9Meta');
+  if (!status.loaded) {
+    valEl.textContent = 'Sin cargar';
+    metaEl.textContent = 'Pendiente de subir el reporte';
+    return;
+  }
+  valEl.textContent = `${status.rowCount} registros`;
+  const d = new Date(status.timestamp);
+  const fecha = d.toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  metaEl.textContent = `${fecha} · ${status.user}`;
+}
+
+// ─── NAV ──────────────────────────────────────────────────────────
+function initNav() {
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', e => {
+      e.preventDefault();
+      if (item.classList.contains('disabled')) return;
+      const section = item.dataset.section;
+      switchSection(section);
+      if (section === 'envios') refreshBitacora();
+    });
+  });
+}
+
+function switchSection(section) {
+  document.querySelectorAll('.nav-item').forEach(it => it.classList.remove('active'));
+  document.querySelector(`.nav-item[data-section="${section}"]`).classList.add('active');
+  document.querySelectorAll('.section-content').forEach(s => s.hidden = true);
+  document.getElementById(`section-${section}`).hidden = false;
+}
+
+// ─── DROPZONES ────────────────────────────────────────────────────
+function initDropzones() {
+  ['rep1', 'rep9'].forEach(target => {
+    const dz = document.getElementById(`dropzone-${target}`);
+    const input = document.getElementById(`file-${target}`);
+    const browseBtn = document.querySelector(`.btn-browse[data-target="${target}"]`);
+
+    dz.addEventListener('click', e => {
+      if (e.target.classList.contains('btn-browse')) return;
+      input.click();
+    });
+    browseBtn.addEventListener('click', e => { e.stopPropagation(); input.click(); });
+
+    input.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (file) handleFile(file, target);
+      input.value = '';
+    });
+
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', e => { e.preventDefault(); dz.classList.remove('dragover'); });
+    dz.addEventListener('drop', e => {
+      e.preventDefault();
+      dz.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file, target);
+    });
+  });
+}
+
+async function handleFile(file, target) {
+  const statusEl = document.getElementById(`status-${target}`);
+  if (!/\.(xlsx|xls)$/i.test(file.name)) {
+    showCardStatus(statusEl, 'error', 'Formato no válido. Usa .xlsx o .xls');
+    return;
+  }
+  showCardStatus(statusEl, 'info', `<span class="spinner"></span> Procesando ${file.name}…`);
+  try {
+    const rows = await parseXlsx(file);
+    state[target].rows = rows;
+
+    google.script.run
+      .withSuccessHandler(validation => {
+        state[target].validation = validation;
+        if (!validation.ok) {
+          let msg = `<strong>${validation.error}</strong>`;
+          if (validation.mismatches && validation.mismatches.length) {
+            msg += '<ul>' + validation.mismatches.slice(0, 5).map(m => `<li>${escapeHtml(m)}</li>`).join('') + '</ul>';
+          }
+          showCardStatus(statusEl, 'error', msg);
+          document.getElementById(`card-${target}`).classList.add('error');
+          return;
+        }
+        showCardStatus(statusEl, 'success',
+          `✓ <strong>${file.name}</strong> · ${validation.rowCount} registros · listo para confirmar`);
+        document.getElementById(`card-${target}`).classList.remove('error');
+        document.getElementById(`dropzone-${target}`).classList.add('has-file');
+        openPreviewModal(target, file.name);
+      })
+      .withFailureHandler(err => showCardStatus(statusEl, 'error', `Error de validación: ${escapeHtml(err.message)}`))
+      [target === 'rep1' ? 'validateRep1' : 'validateRep9'](rows);
+
+  } catch (err) {
+    showCardStatus(statusEl, 'error', `No se pudo leer el archivo: ${escapeHtml(err.message)}`);
+  }
+}
+
+function showCardStatus(el, type, html) {
+  const cls = type === 'error' ? 'status-error' : 'status-success';
+  el.innerHTML = `<div class="${cls}">${html}</div>`;
+}
+
+function parseXlsx(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+        const cleaned = rows.map(row => row.map(cell => {
+          if (cell instanceof Date) return cell.toISOString();
+          return cell;
+        }));
+        resolve(cleaned);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ─── MODALES ──────────────────────────────────────────────────────
+function initModals() {
+  // Preview de carga
+  document.getElementById('modalClose').addEventListener('click', closePreviewModal);
+  document.getElementById('btnCancel').addEventListener('click', closePreviewModal);
+  document.getElementById('btnConfirm').addEventListener('click', confirmSave);
+  document.getElementById('previewModal').addEventListener('click', e => {
+    if (e.target.id === 'previewModal') closePreviewModal();
+  });
+
+  // Detalle del aviso
+  document.getElementById('detailClose').addEventListener('click', closeDetailModal);
+  document.getElementById('detailCloseBtn').addEventListener('click', closeDetailModal);
+  document.getElementById('detailModal').addEventListener('click', e => {
+    if (e.target.id === 'detailModal') closeDetailModal();
+  });
+
+  // Email preview
+  document.getElementById('emailClose').addEventListener('click', closeEmailModal);
+  document.getElementById('emailCloseBtn').addEventListener('click', closeEmailModal);
+  document.getElementById('btnEnviarIndividual').addEventListener('click', enviarIndividual);
+  document.getElementById('emailModal').addEventListener('click', e => {
+    if (e.target.id === 'emailModal') closeEmailModal();
+  });
+
+  // Confirm masivo
+  document.getElementById('confirmClose').addEventListener('click', closeConfirmModal);
+  document.getElementById('confirmCancelBtn').addEventListener('click', closeConfirmModal);
+  document.getElementById('btnConfirmMasivo').addEventListener('click', ejecutarEnvioMasivo);
+
+  // Reporte
+  document.getElementById('reportClose').addEventListener('click', closeReportModal);
+  document.getElementById('reportCloseBtn').addEventListener('click', closeReportModal);
+}
+
+function openPreviewModal(target, filename) {
+  state.pendingTarget = target;
+  const rows = state[target].rows;
+  const headers = rows[0];
+  const dataRows = rows.slice(1).filter(r => r.some(c => c !== '' && c != null));
+
+  document.getElementById('previewTitle').textContent =
+    target === 'rep1' ? 'Vista previa · Rep1 (Vencimientos)' : 'Vista previa · Rep9 (Saldos)';
+  document.getElementById('previewSummary').innerHTML = `
+    <strong>Archivo:</strong> ${escapeHtml(filename)} &nbsp;·&nbsp;
+    <strong>Registros:</strong> ${dataRows.length} &nbsp;·&nbsp;
+    <strong>Columnas:</strong> ${headers.length}
+    <br>
+    <span style="color: var(--cualli-gray-600); font-size: 12px;">
+      Mostrando primeras 8 filas. Al confirmar, se reemplazará el contenido de
+      <code>${target === 'rep1' ? 'Cache_Rep1' : 'Cache_Rep9'}</code>.
+    </span>`;
+
+  const tbl = document.getElementById('previewTable');
+  const thead = '<thead><tr>' + headers.map(h => `<th>${escapeHtml(String(h))}</th>`).join('') + '</tr></thead>';
+  const tbody = '<tbody>' + dataRows.slice(0, 8).map(r =>
+    '<tr>' + r.map(c => `<td>${escapeHtml(formatCell(c))}</td>`).join('') + '</tr>'
+  ).join('') + '</tbody>';
+  tbl.innerHTML = thead + tbody;
+
+  document.getElementById('previewModal').hidden = false;
+}
+
+function closePreviewModal() {
+  document.getElementById('previewModal').hidden = true;
+  state.pendingTarget = null;
+}
+
+function confirmSave() {
+  const target = state.pendingTarget;
+  if (!target) return;
+  const rows = state[target].rows;
+  const btn = document.getElementById('btnConfirm');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Guardando…';
+
+  const fn = target === 'rep1' ? 'saveRep1ToCache' : 'saveRep9ToCache';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.disabled = false;
+      btn.textContent = 'Guardar al maestro';
+      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
+      closePreviewModal();
+      toast(`✓ ${result.label} guardado: ${result.rowsWritten} registros`, 'success');
+      renderCacheStatus(target, {
+        loaded: true, rowCount: result.rowsWritten,
+        timestamp: result.timestamp, user: result.user
+      });
+      document.getElementById(`card-${target}`).classList.add('success');
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.textContent = 'Guardar al maestro';
+      toast(`Error al guardar: ${err.message}`, 'error');
+    })
+    [fn](rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
+function initDashboard() {
+  document.getElementById('btnRecalcular').addEventListener('click', recalcularAvisos);
+  document.getElementById('btnHojaTrabajo').addEventListener('click', regenerarHojaTrabajo);
+  document.getElementById('toggleModoPrueba').addEventListener('change', toggleModoPrueba);
+
+  // Cargar estado actual del modo prueba al abrir
+  google.script.run
+    .withSuccessHandler(activo => {
+      document.getElementById('toggleModoPrueba').checked = !!activo;
+      document.getElementById('modoPruebaBanner').hidden = !activo;
+    })
+    .withFailureHandler(() => {})
+    .getModoPrueba();
+
+  // Filtros
+  document.querySelectorAll('#filterPills .filter-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#filterPills .filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.filterTipo = pill.dataset.filter;
+      renderTable();
+    });
+  });
+
+  document.getElementById('filterSearch').addEventListener('input', e => {
+    state.filterSearch = e.target.value.toLowerCase().trim();
+    renderTable();
+  });
+
+  // Check all
+  document.getElementById('checkAll').addEventListener('change', e => {
+    const lineas = getFilteredLineas();
+    if (e.target.checked) {
+      lineas.forEach(l => state.selected.add(l));
+    } else {
+      lineas.forEach(l => state.selected.delete(l));
+    }
+    renderTable();
+    updateSelectionBar();
+  });
+
+  // Selection bar
+  document.getElementById('btnSelectClear').addEventListener('click', () => {
+    state.selected.clear();
+    renderTable();
+    updateSelectionBar();
+  });
+  document.getElementById('btnEnviarMasivo').addEventListener('click', abrirConfirmacionMasiva);
+}
+
+// ─── MODO PRUEBA TOGGLE ────────────────────────────────────────────
+function toggleModoPrueba(e) {
+  const activo = e.target.checked;
+  const banner = document.getElementById('modoPruebaBanner');
+  banner.hidden = !activo;
+
+  google.script.run
+    .withSuccessHandler(result => {
+      if (!result.ok) {
+        toast(`Error al cambiar modo: ${result.error}`, 'error');
+        // Revertir el toggle
+        e.target.checked = !activo;
+        banner.hidden = activo;
+        return;
+      }
+      toast(activo
+        ? '⚠ Modo prueba ACTIVADO — recalcula para ver cambios'
+        : '✓ Modo prueba DESACTIVADO — operando en producción',
+        activo ? 'error' : 'success');
+    })
+    .withFailureHandler(err => {
+      toast(`Error: ${err.message}`, 'error');
+      e.target.checked = !activo;
+      banner.hidden = activo;
+    })
+    .setModoPrueba(activo);
+}
+
+// ─── HOJA DE TRABAJO ───────────────────────────────────────────────
+function regenerarHojaTrabajo() {
+  const btn = document.getElementById('btnHojaTrabajo');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generando…';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      if (!result.ok) {
+        toast(`Error: ${result.error}`, 'error');
+        return;
+      }
+      toast(`✓ Hoja_Trabajo regenerada · ${result.filasTrabajo} filas (Saldos: ${result.filasSaldos})`, 'success');
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      toast(`Error: ${err.message}`, 'error');
+    })
+    .regenerarHojaTrabajo();
+}
+
+function recalcularAvisos() {
+  const btn = document.getElementById('btnRecalcular');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-light"></span> Calculando…';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
+
+      state.avisos = result.avisos;
+      state.stats = result.stats;
+      state.fechaReporte = result.fechaReporte;
+      state.warnings = result.warnings || [];
+      state.selected.clear();
+
+      // Sincronizar banner y toggle con el resultado
+      const toggle = document.getElementById('toggleModoPrueba');
+      toggle.checked = !!result.modoPrueba;
+      document.getElementById('modoPruebaBanner').hidden = !result.modoPrueba;
+
+      renderFechaCalculo();
+      renderKPIs();
+      renderFilterCounts();
+      renderTable();
+      updateSelectionBar();
+
+      document.getElementById('dashEmpty').hidden = true;
+      document.getElementById('kpiGrid').hidden = false;
+      document.getElementById('dashFilters').hidden = false;
+      document.getElementById('tableWrap').hidden = false;
+
+      toast(`✓ ${result.stats.elegibles} avisos calculados`, 'success');
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      toast(`Error al calcular: ${err.message}`, 'error');
+    })
+    .calcularAvisos();
+}
+
+function renderFechaCalculo() {
+  const d = new Date(state.fechaReporte);
+  const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+  let txt = d.toLocaleDateString('es-MX', opts);
+  txt = txt.charAt(0).toUpperCase() + txt.slice(1);
+  document.getElementById('fechaCalculo').textContent = txt;
+}
+
+function renderKPIs() {
+  const s = state.stats;
+  document.getElementById('kpiTotal').textContent = formatMoney(s.sumaTotal);
+  document.getElementById('kpiTotalMeta').textContent =
+    `${s.elegibles} avisos elegibles · ${s.total} en periodo`;
+  document.getElementById('kpiCapVenc').textContent = formatMoney(s.sumaCapVencido);
+  const conCapVenc = state.avisos.filter(a => a.elegibleAviso && a.capVencido > 0).length;
+  document.getElementById('kpiCapVencMeta').textContent = `${conCapVenc} cliente(s) con adeudos previos`;
+  document.getElementById('kpiMor').textContent = formatMoney(s.sumaMoratorios);
+  const totalWarn = s.sinRep9 + s.sinTasa + s.sinCorreo;
+  document.getElementById('kpiWarn').textContent = totalWarn;
+  document.getElementById('kpiWarnMeta').textContent =
+    `${s.sinRep9} sin Rep9 · ${s.sinTasa} sin tasa · ${s.sinCorreo} sin correo`;
+}
+
+function renderFilterCounts() {
+  const s = state.stats;
+  const totalWarn = s.sinRep9 + s.sinTasa + s.sinCorreo;
+  document.querySelector('.filter-pill[data-filter="all"]').innerHTML =
+    `Todos <span class="pill-count">${s.elegibles}</span>`;
+  document.querySelector('.filter-pill[data-filter="T-5"]').innerHTML =
+    `T-5 <span class="pill-count">${s.porTipo['T-5']}</span>`;
+  document.querySelector('.filter-pill[data-filter="T-1"]').innerHTML =
+    `T-1 <span class="pill-count">${s.porTipo['T-1']}</span>`;
+  document.querySelector('.filter-pill[data-filter="T+0"]').innerHTML =
+    `T+0 <span class="pill-count">${s.porTipo['T+0']}</span>`;
+  document.querySelector('.filter-pill[data-filter="warn"]').innerHTML =
+    `Solo con warnings <span class="pill-count">${totalWarn}</span>`;
+}
+
+function getFilteredAvisos() {
+  let filtered = state.avisos.filter(a => a.elegibleAviso);
+  if (state.filterTipo === 'warn') {
+    filtered = filtered.filter(a => a.sinRep9 || a.sinTasa || a.sinCorreo);
+  } else if (state.filterTipo !== 'all') {
+    filtered = filtered.filter(a => a.tipoAviso === state.filterTipo);
+  }
+  if (state.filterSearch) {
+    const q = state.filterSearch;
+    filtered = filtered.filter(a =>
+      String(a.linea).toLowerCase().includes(q) ||
+      String(a.nombre).toLowerCase().includes(q)
+    );
+  }
+  return filtered;
+}
+
+function getFilteredLineas() {
+  return getFilteredAvisos().map(a => String(a.linea));
+}
+
+function isEnviable(a) {
+  // Determina si una línea puede enviarse: tiene STP, correo y elegible
+  return a.elegibleAviso && !a.sinRep9 && !!a.cuentaSTP && !!a.correo && !a.sinCorreo;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('dashTbody');
+  const empty = document.getElementById('tableEmpty');
+  const filtered = getFilteredAvisos();
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '';
+    empty.hidden = false;
+    actualizarCheckAll([]);
+    return;
+  }
+  empty.hidden = true;
+
+  tbody.innerHTML = filtered.map(a => {
+    const hasWarn = a.sinRep9 || a.sinTasa || a.sinCorreo || !a.cuentaSTP;
+    const rowClass = hasWarn ? 'row-warn' : '';
+    const fechaTxt = formatFechaCorta(a.fechaVenc);
+    const tipoBadge = badgeTipoAviso(a.tipoAviso);
+    const monedaBadge = a.moneda === 'USD'
+      ? '<span class="moneda-badge moneda-usd">USD</span>'
+      : '<span class="moneda-badge moneda-mxn">MXN</span>';
+    const warnIcon = hasWarn ? '<span class="warn-icon">⚠</span>' : '';
+    const enviable = isEnviable(a);
+    const checked = state.selected.has(String(a.linea)) ? 'checked' : '';
+    const checkbox = enviable
+      ? `<input type="checkbox" class="row-check" data-linea="${escapeHtml(a.linea)}" ${checked}>`
+      : `<input type="checkbox" disabled title="No enviable: falta STP, correo o tiene warnings">`;
+
+    let acciones;
+    if (!enviable) {
+      const motivos = [];
+      if (a.sinRep9) motivos.push('Sin Rep9');
+      else if (!a.cuentaSTP) motivos.push('Sin STP');
+      else if (a.sinCorreo) motivos.push('Sin correo');
+      acciones = `<span class="tag-warn">${motivos.join(', ')}</span>`;
+    } else {
+      acciones = `
+        <button class="action-btn" data-act="detalle" data-linea="${escapeHtml(a.linea)}">Detalle</button>
+        <button class="action-btn" data-act="correo" data-linea="${escapeHtml(a.linea)}">Vista correo</button>`;
+    }
+
+    return `
+      <tr class="${rowClass}" data-linea="${escapeHtml(a.linea)}">
+        <td class="col-check">${checkbox}</td>
+        <td>${tipoBadge}</td>
+        <td>${fechaTxt}</td>
+        <td>${escapeHtml(a.linea)}</td>
+        <td class="cell-name">${warnIcon}${escapeHtml(truncate(a.nombre, 32))}</td>
+        <td class="amount ${a.capital === 0 ? 'cell-zero' : ''}">${formatNumber(a.capital)}</td>
+        <td class="amount ${a.capVencido === 0 ? 'cell-zero' : ''}">${formatNumber(a.capVencido)}</td>
+        <td class="amount ${(a.moratoriosAcum + a.moratoriosPeriodo) === 0 ? 'cell-zero' : ''}">${formatNumber(a.moratoriosAcum + a.moratoriosPeriodo)}</td>
+        <td class="amount total">${formatNumber(a.total)}</td>
+        <td>${monedaBadge}</td>
+        <td>${acciones}</td>
+      </tr>`;
+  }).join('');
+
+  // Bind clicks
+  tbody.querySelectorAll('.action-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const act = btn.dataset.act;
+      const linea = btn.dataset.linea;
+      if (act === 'detalle') openDetailModal(linea);
+      else if (act === 'correo') openEmailModal(linea);
+    });
+  });
+
+  // Bind checkboxes
+  tbody.querySelectorAll('.row-check').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const linea = String(cb.dataset.linea);
+      if (cb.checked) state.selected.add(linea);
+      else state.selected.delete(linea);
+      updateSelectionBar();
+      actualizarCheckAll(getFilteredLineas());
+    });
+  });
+
+  actualizarCheckAll(getFilteredLineas());
+}
+
+function actualizarCheckAll(lineas) {
+  const cb = document.getElementById('checkAll');
+  const enviables = lineas.filter(l => {
+    const a = state.avisos.find(x => String(x.linea) === l);
+    return a && isEnviable(a);
+  });
+  if (enviables.length === 0) {
+    cb.checked = false; cb.indeterminate = false; return;
+  }
+  const sel = enviables.filter(l => state.selected.has(l)).length;
+  cb.checked = sel === enviables.length;
+  cb.indeterminate = sel > 0 && sel < enviables.length;
+}
+
+function updateSelectionBar() {
+  const bar = document.getElementById('selectionBar');
+  const count = state.selected.size;
+  if (count === 0) { bar.hidden = true; return; }
+  bar.hidden = false;
+
+  const sumaTotal = Array.from(state.selected).reduce((s, linea) => {
+    const a = state.avisos.find(x => String(x.linea) === linea);
+    return s + (a ? a.total : 0);
+  }, 0);
+
+  document.getElementById('selectionCount').textContent = count;
+  document.getElementById('selectionAmount').textContent = formatMoney(sumaTotal);
+}
+
+function badgeTipoAviso(tipo) {
+  const map = { 'T-5': 'aviso-t5', 'T-1': 'aviso-t1', 'T+0': 'aviso-t0' };
+  const cls = map[tipo] || 'aviso-other';
+  return `<span class="aviso-badge ${cls}">${tipo}</span>`;
+}
+
+// ─── DETAIL MODAL ─────────────────────────────────────────────────
+function openDetailModal(linea) {
+  const a = state.avisos.find(x => String(x.linea) === String(linea));
+  if (!a) return;
+
+  document.getElementById('detailTitle').textContent =
+    `${a.tipoAviso} · Línea ${a.linea} · ${a.nombre}`;
+
+  const warnings = [];
+  if (a.sinRep9) warnings.push('Sin saldo en Rep9');
+  if (a.sinTasa) warnings.push('Sin tasa registrada');
+  if (a.sinCorreo) warnings.push('Sin correo registrado');
+  if (!a.cuentaSTP) warnings.push('Sin cuenta STP');
+  const warnBanner = warnings.length
+    ? `<div class="detail-warning-banner">⚠ ${warnings.join(' · ')}</div>`
+    : '';
+
+  document.getElementById('detailBody').innerHTML = `
+    ${warnBanner}
+    <div class="detail-section">
+      <h4>Identificación</h4>
+      <div class="detail-grid">
+        <div class="detail-row"><span class="label">Línea de Crédito</span><span class="value">${escapeHtml(a.linea)}</span></div>
+        <div class="detail-row"><span class="label">Tipo de Aviso</span><span class="value">${badgeTipoAviso(a.tipoAviso)}</span></div>
+        <div class="detail-row"><span class="label">Cliente</span><span class="value">${escapeHtml(a.nombre)}</span></div>
+        <div class="detail-row"><span class="label">Fecha de Vencimiento</span><span class="value">${formatFechaLarga(a.fechaVenc)}</span></div>
+        <div class="detail-row"><span class="label">Días al Vencimiento</span><span class="value">${a.dias}</span></div>
+        <div class="detail-row"><span class="label">Tasa Contrato</span><span class="value">${(a.tasaContrato * 100).toFixed(2)}%</span></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Próximo Vencimiento (Rep1)</h4>
+      <div class="detail-grid">
+        <div class="detail-row"><span class="label">Capital</span><span class="value">${formatMoney(a.capital)}</span></div>
+        <div class="detail-row"><span class="label">Intereses</span><span class="value">${formatMoney(a.intereses)}</span></div>
+        <div class="detail-row"><span class="label">Otros</span><span class="value">${formatMoney(a.otros)}</span></div>
+        <div class="detail-row"><span class="label">IVA</span><span class="value">${formatMoney(a.iva)}</span></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Adeudos Previos (Rep9)</h4>
+      <div class="detail-grid">
+        <div class="detail-row"><span class="label">Capital Vencido</span><span class="value">${formatMoney(a.capVencido)}</span></div>
+        <div class="detail-row"><span class="label">Intereses Vencidos</span><span class="value">${formatMoney(a.intVencidos)}</span></div>
+        <div class="detail-row"><span class="label">Moratorios Acumulados</span><span class="value">${formatMoney(a.moratoriosAcum)}</span></div>
+        <div class="detail-row"><span class="label">Tasa Moratoria (×2)</span><span class="value">${(a.tasaMoratoria * 100).toFixed(2)}%</span></div>
+        <div class="detail-row" style="grid-column: 1 / -1;"><span class="label">Moratorios del Periodo (Cap.Venc × Tasa Mor / 360 × ${a.dias} días)</span><span class="value">${formatMoney(a.moratoriosPeriodo)}</span></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Contacto</h4>
+      <div class="detail-row"><span class="label">Correo</span><span class="value" style="font-size: 12px; max-width: 60%; text-align: right; word-break: break-all;">${escapeHtml(a.correo) || '—'}</span></div>
+      <div class="detail-row"><span class="label">Cuenta STP</span><span class="value">${escapeHtml(String(a.cuentaSTP)) || '—'}</span></div>
+    </div>
+    <div class="detail-row total-row">
+      <span class="label">TOTAL DEL AVISO</span>
+      <span class="value">${formatMoney(a.total)}</span>
+    </div>`;
+  document.getElementById('detailModal').hidden = false;
+}
+
+function closeDetailModal() {
+  document.getElementById('detailModal').hidden = true;
+}
+
+// ─── EMAIL PREVIEW MODAL ──────────────────────────────────────────
+function openEmailModal(linea) {
+  state.currentPreviewLinea = String(linea);
+  const modal = document.getElementById('emailModal');
+  const meta = document.getElementById('emailMeta');
+  const frame = document.getElementById('emailPreviewFrame');
+  const btnEnviar = document.getElementById('btnEnviarIndividual');
+
+  meta.innerHTML = `<div class="email-meta-row"><span class="email-meta-label">Cargando…</span></div>`;
+  frame.srcdoc = '<p style="font-family:Arial; padding:20px; color:#999;">Cargando preview…</p>';
+  btnEnviar.disabled = true;
+  modal.hidden = false;
+
+  google.script.run
+    .withSuccessHandler(result => {
+      if (!result.ok) {
+        meta.innerHTML = `<div class="email-meta-warn">⚠ ${escapeHtml(result.error)}</div>`;
+        frame.srcdoc = '';
+        btnEnviar.disabled = true;
+        return;
+      }
+
+      // Meta info
+      let metaHtml = `
+        <div class="email-meta-row"><span class="email-meta-label">De:</span><span class="email-meta-value">${escapeHtml(result.from)}</span></div>
+        <div class="email-meta-row"><span class="email-meta-label">Para:</span><span class="email-meta-value">${escapeHtml(result.destinatarios.join(', ') || '—')}</span></div>
+        <div class="email-meta-row"><span class="email-meta-label">CC:</span><span class="email-meta-value">${escapeHtml(result.cc || '—')}</span></div>
+        <div class="email-meta-row"><span class="email-meta-label">Asunto:</span><span class="email-meta-value"><strong>${escapeHtml(result.asunto)}</strong></span></div>
+      `;
+      if (!result.validacion.ok) {
+        metaHtml += `<div class="email-meta-warn">⚠ ${escapeHtml(result.validacion.error)}</div>`;
+        btnEnviar.disabled = true;
+      } else {
+        btnEnviar.disabled = false;
+      }
+      meta.innerHTML = metaHtml;
+
+      // HTML body en iframe
+      frame.srcdoc = result.htmlBody;
+    })
+    .withFailureHandler(err => {
+      meta.innerHTML = `<div class="email-meta-warn">⚠ Error: ${escapeHtml(err.message)}</div>`;
+      frame.srcdoc = '';
+    })
+    .previsualizarCorreo(linea);
+}
+
+function closeEmailModal() {
+  document.getElementById('emailModal').hidden = true;
+  state.currentPreviewLinea = null;
+}
+
+function enviarIndividual() {
+  const linea = state.currentPreviewLinea;
+  if (!linea) return;
+  const btn = document.getElementById('btnEnviarIndividual');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Enviando…';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      if (!result.ok) {
+        toast(`Error: ${result.error}`, 'error');
+        return;
+      }
+      closeEmailModal();
+      toast(`✓ Aviso enviado a ${result.destinatarios.join(', ')}`, 'success');
+      // Refrescar avisos para que detecten el "ya enviado hoy"
+      recalcularAvisos();
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      toast(`Error de envío: ${err.message}`, 'error');
+    })
+    .enviarAvisoIndividual(linea);
+}
+
+// ─── ENVÍO MASIVO ─────────────────────────────────────────────────
+function abrirConfirmacionMasiva() {
+  const lineas = Array.from(state.selected);
+  if (lineas.length === 0) {
+    toast('No hay avisos seleccionados', 'error');
+    return;
+  }
+
+  const seleccionados = lineas.map(l => state.avisos.find(a => String(a.linea) === l)).filter(Boolean);
+  const sumaTotal = seleccionados.reduce((s, a) => s + a.total, 0);
+
+  // Distribución por tipo
+  const porTipo = { 'T-5': 0, 'T-1': 0, 'T+0': 0 };
+  seleccionados.forEach(a => { porTipo[a.tipoAviso] = (porTipo[a.tipoAviso] || 0) + 1; });
+
+  const filasLista = seleccionados.slice(0, 50).map(a => `
+    <div class="confirm-list-row">
+      <div class="left">
+        ${badgeTipoAviso(a.tipoAviso)}
+        <span>${escapeHtml(truncate(a.nombre, 36))}</span>
+      </div>
+      <span class="right">${formatMoney(a.total)}</span>
+    </div>`).join('');
+
+  const moreCount = seleccionados.length - 50;
+  const moreNote = moreCount > 0
+    ? `<div style="padding: 8px 14px; font-size: 12px; color: var(--cualli-gray-500); font-style: italic;">…y ${moreCount} más</div>`
+    : '';
+
+  document.getElementById('confirmBody').innerHTML = `
+    <div class="confirm-summary">
+      <div class="confirm-stat">
+        <span class="label">Avisos a enviar</span>
+        <span class="value">${seleccionados.length}</span>
+      </div>
+      <div class="confirm-stat">
+        <span class="label">Distribución</span>
+        <span class="value">T-5: ${porTipo['T-5']} · T-1: ${porTipo['T-1']} · T+0: ${porTipo['T+0']}</span>
+      </div>
+      <div class="confirm-stat total">
+        <span class="label">Total a comunicar</span>
+        <span class="value">${formatMoney(sumaTotal)}</span>
+      </div>
+    </div>
+    <div class="confirm-warn-box">
+      <strong>Importante:</strong> los correos se enviarán desde tu cuenta personal. Cada envío queda registrado en la bitácora con timestamp y status. Esta acción NO se puede deshacer.
+    </div>
+    <div class="confirm-list">
+      ${filasLista}
+      ${moreNote}
+    </div>`;
+
+  document.getElementById('confirmModal').hidden = false;
+}
+
+function closeConfirmModal() {
+  document.getElementById('confirmModal').hidden = true;
+}
+
+function ejecutarEnvioMasivo() {
+  const lineas = Array.from(state.selected);
+  const btn = document.getElementById('btnConfirmMasivo');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span> Enviando ${lineas.length}…`;
+
+  google.script.run
+    .withSuccessHandler(reporte => {
+      btn.disabled = false;
+      btn.innerHTML = 'Sí, enviar todos';
+      closeConfirmModal();
+      mostrarReporte(reporte);
+      // Refrescar avisos
+      state.selected.clear();
+      recalcularAvisos();
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerHTML = 'Sí, enviar todos';
+      toast(`Error en envío masivo: ${err.message}`, 'error');
+    })
+    .enviarAvisosMasivo(lineas);
+}
+
+function mostrarReporte(rep) {
+  const filas = rep.resultados.map(r => {
+    const cls = r.ok ? 'ok' : 'fail';
+    const icon = r.ok ? '✓' : '✕';
+    const cliente = r.cliente ? truncate(r.cliente, 30) : `Línea ${r.linea}`;
+    return `
+      <div class="report-detail-row ${cls}">
+        <div class="left">
+          <span class="icon-status">${icon}</span>
+          <div class="info">
+            <span class="info-line">Línea ${escapeHtml(r.linea)} · ${escapeHtml(cliente)}</span>
+            ${!r.ok ? `<span class="info-msg">${escapeHtml(r.error)}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('reportBody').innerHTML = `
+    <div class="report-summary-grid">
+      <div class="report-stat success">
+        <div class="report-stat-num">${rep.enviados}</div>
+        <div class="report-stat-label">Enviados</div>
+      </div>
+      <div class="report-stat error">
+        <div class="report-stat-num">${rep.conError}</div>
+        <div class="report-stat-label">Con error</div>
+      </div>
+      <div class="report-stat warn">
+        <div class="report-stat-num">${rep.omitidos}</div>
+        <div class="report-stat-label">Omitidos</div>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: var(--cualli-gray-500); margin-bottom: 10px;">
+      Duración: ${rep.duracionSeg}s · Total: ${rep.total}
+    </div>
+    <div class="report-detail-list">${filas}</div>`;
+
+  document.getElementById('reportModal').hidden = false;
+}
+
+function closeReportModal() {
+  document.getElementById('reportModal').hidden = true;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BITÁCORA
+// ═══════════════════════════════════════════════════════════════════
+function initBitacora() {
+  document.getElementById('btnRefreshBitacora').addEventListener('click', refreshBitacora);
+}
+
+function refreshBitacora() {
+  const btn = document.getElementById('btnRefreshBitacora');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-light"></span> Cargando…';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
+      state.bitacora = result.registros;
+      renderBitacora();
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      toast(`Error: ${err.message}`, 'error');
+    })
+    .leerBitacora(50);
+}
+
+function renderBitacora() {
+  const tbody = document.getElementById('bitacoraTbody');
+  const empty = document.getElementById('bitacoraEmpty');
+  const countEl = document.getElementById('bitacoraCount');
+
+  countEl.textContent = `${state.bitacora.length} registros`;
+
+  if (state.bitacora.length === 0) {
+    tbody.innerHTML = '';
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  tbody.innerHTML = state.bitacora.map(r => {
+    const ts = r.timestamp ? new Date(r.timestamp) : null;
+    const tsTxt = ts && !isNaN(ts)
+      ? ts.toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : '—';
+    const statusCls = r.status === 'ENVIADO' ? 'status-enviado' :
+                      r.status === 'ERROR' ? 'status-error' : 'status-omitido';
+    const statusBadge = `<span class="status-badge ${statusCls}">${r.status}</span>`;
+    return `
+      <tr>
+        <td>${tsTxt}</td>
+        <td>${badgeTipoAviso(r.tipoAviso)}</td>
+        <td>${escapeHtml(r.linea)}</td>
+        <td class="cell-name">${escapeHtml(truncate(r.cliente, 30))}</td>
+        <td class="amount total">${formatNumber(r.total)}</td>
+        <td>${statusBadge}</td>
+        <td style="font-size: 11px; color: var(--cualli-gray-600);">${escapeHtml(truncate(r.mensaje, 50))}</td>
+      </tr>`;
+  }).join('');
+}
+
+// ─── TOAST ────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  const txt = document.getElementById('toastMsg');
+  el.className = 'toast ' + type;
+  icon.textContent = type === 'success' ? '✓' : type === 'error' ? '✕' : '•';
+  txt.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function truncate(str, max) {
+  if (!str) return '';
+  return str.length > max ? str.substring(0, max - 1) + '…' : str;
+}
+
+function formatCell(c) {
+  if (c == null || c === '') return '';
+  if (typeof c === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(c)) {
+    const d = new Date(c);
+    if (!isNaN(d)) return d.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+  if (typeof c === 'number') return c.toLocaleString('es-MX', { maximumFractionDigits: 2 });
+  return String(c);
+}
+
+function formatNumber(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  if (n === 0) return '—';
+  return Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatMoney(n) {
+  if (n === null || n === undefined) return '—';
+  const num = Number(n) || 0;
+  return '$' + num.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatFechaCorta(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
+}
+
+function formatFechaLarga(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  let txt = d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+</script>
