@@ -3,14 +3,7 @@
  *  COBRANZA PREVENTIVA — Backend (Code.gs)
  *  Financiera Cualli SAPI de CV SOFOM ENR · Contraloría
  * ═══════════════════════════════════════════════════════════════════════════
- *  Módulo de carga: Rep1 (vencimientos) y Rep9 (saldos) → Spreadsheet maestro
- *
- *  ESTRUCTURA REP1 (ACTUALIZADA):
- *    Se cargan SOLO las columnas B-K del archivo original (10 cols), omitiendo:
- *    - Col A: "Prod." (no se usa)
- *    - Col D: "Linea de Crédito" duplicada (queda solo la C)
- *    - Cols L-O: "Plan/Real", "Sucursal", "Promotor", "Cobrador" (no relevantes)
- *    - Cols al final amarillas (totales informativos)
+ * 
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -25,6 +18,22 @@ const SHEETS = {
   CACHE_REP9: 'Cache_Rep9',
   BITACORA: 'Bitacora_Envios'
 };
+
+// ─── CONSTANTES DEL DOMINIO ────────────────────────────────────────────────
+// Feriados CNBV 2026 (Formato YYYY-MM-DD)
+const FERIADOS_CNBV = [
+  '2026-01-01', // Año Nuevo
+  '2026-02-02', // Conmemoración 5 de feb
+  '2026-03-16', // Conmemoración 21 de mar
+  '2026-04-02', // Jueves Santo
+  '2026-04-03', // Viernes Santo
+  '2026-05-01', // Día del Trabajo
+  '2026-09-16', // Día de la Independencia
+  '2026-11-02', // Día de Muertos
+  '2026-11-16', // Conmemoración 20 de nov
+  '2026-12-12', // Día del empleado bancario
+  '2026-12-25'  // Navidad
+];
 
 // ─── HEADERS ESPERADOS ─────────────────────────────────────────────────────
 
@@ -70,6 +79,27 @@ const REP9_HEADERS = [
   '*Saldo Comisiones', '*IVA Saldo Comisiones', '*Saldo Vigente',
   '*Saldo Vencido', '*SALDO TOTAL', 'Pagos No Aplicados', 'Promotor'
 ];
+
+function obtenerDiaHabilSiguiente_(fechaOriginal) {
+  let fecha = new Date(fechaOriginal.getTime());
+  
+  while (true) {
+    let diaSemana = fecha.getDay(); 
+    
+    // Extraer YYYY-MM-DD en hora local para comparar con el arreglo
+    let anio = fecha.getFullYear();
+    let mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    let diaMes = String(fecha.getDate()).padStart(2, '0');
+    let fechaStr = `${anio}-${mes}-${diaMes}`;
+
+    if (diaSemana === 0 || diaSemana === 6 || FERIADOS_CNBV.includes(fechaStr)) {
+      fecha.setDate(fecha.getDate() + 1);
+    } else {
+      break; // Es día hábil, rompemos el bucle
+    }
+  }
+  return fecha;
+}
 
 // ─── ENTRY POINTS ──────────────────────────────────────────────────────────
 
@@ -337,48 +367,59 @@ function validateReport_(rows, expectedHeaders, label) {
 function saveCache_(rows, sheetName, expectedHeaders, label) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sh = ss.getSheetByName(sheetName);
-  if (!sh) {
-    return { ok: false, error: `Hoja "${sheetName}" no encontrada en el maestro.` };
-  }
+  if (!sh) return { ok: false, error: `Hoja "${sheetName}" no encontrada.` };
 
   const userEmail = Session.getActiveUser().getEmail() || 'desconocido';
   const now = new Date();
+  const fechaMX = Utilities.formatDate(now, "America/Mexico_City", "yyyy-MM-dd HH:mm:ss");
 
-  // Limpiar datos previos (preservar banner row 1, metadata row 2-3, header row 4)
   const lastRow = sh.getLastRow();
   if (lastRow > 4) {
     sh.getRange(5, 1, lastRow - 4, sh.getMaxColumns()).clearContent();
   }
 
-  // Metadata
   sh.getRange('A2').setValue('Fecha de carga:').setFontWeight('bold').setFontFamily('Arial').setFontSize(10);
-  sh.getRange('B2').setValue(now).setNumberFormat('yyyy-mm-dd hh:mm:ss').setFontFamily('Arial').setFontSize(10);
+  sh.getRange('B2').setValue("'" + fechaMX).setFontFamily('Arial').setFontSize(10); 
   sh.getRange('C2').setValue('Cargado por:').setFontWeight('bold').setFontFamily('Arial').setFontSize(10);
   sh.getRange('D2').setValue(userEmail).setFontFamily('Arial').setFontSize(10);
 
-  // Headers en row 4
   sh.getRange(4, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
 
-  // Datos a partir de row 5
   const dataRows = rows.slice(1).filter(r => r.some(c => c !== null && c !== undefined && c !== ''));
-  if (dataRows.length === 0) {
-    return { ok: false, error: `${label}: no hay filas con datos para guardar.` };
-  }
+  if (dataRows.length === 0) return { ok: false, error: `${label}: no hay filas con datos.` };
 
   const numCols = expectedHeaders.length;
   const normalized = dataRows.map(r => {
     const row = r.slice(0, numCols);
     while (row.length < numCols) row.push('');
-    return row;
+    
+    return row.map(cell => {
+      if (typeof cell === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(cell)) {
+        const partes = cell.split('T')[0].split('-');
+        
+        // ─── EL TRUCO BANCARIO CONTRA ZONAS HORARIAS ───
+        // Obligamos al reloj interno a marcar las 12:00:00 (Mediodía).
+        // Así, un desfase del servidor jamás botará el día al 23:00 del día anterior.
+        return new Date(parseInt(partes[0], 10), parseInt(partes[1], 10) - 1, parseInt(partes[2], 10), 12, 0, 0, 0);
+      }
+      return cell;
+    });
   });
 
   sh.getRange(5, 1, normalized.length, numCols).setValues(normalized);
+
+  // Al aplicar este formato estricto, la celda ocultará la hora (12:00) y mostrará únicamente el día exacto.
+  if (sheetName === SHEETS.CACHE_REP1) {
+    sh.getRange(5, 1, normalized.length, 1).setNumberFormat('dd/MM/yyyy'); 
+  } else if (sheetName === SHEETS.CACHE_REP9) {
+    sh.getRange(5, 5, normalized.length, 2).setNumberFormat('dd/MM/yyyy'); 
+  }
 
   return {
     ok: true,
     label: label,
     rowsWritten: normalized.length,
-    timestamp: now.toISOString(),
+    timestamp: fechaMX.replace(' ', 'T'), 
     user: userEmail
   };
 }
@@ -516,4 +557,17 @@ function colToLetter_(col) {
     col = Math.floor((col - 1) / 26);
   }
   return letter;
+}
+
+function cronEnvioDiario() {
+  const calculo = calcularAvisos();
+  if (!calculo.ok) return; // Podrías enviarte un correo a ti mismo avisando que falló el cálculo
+  
+  // Buscar a los que hoy cumplen la condición exacta de T-5 o T-1
+  const avisosAEnviar = calculo.avisos.filter(a => a.dias === 5 || a.dias === 1);
+  const lineas = avisosAEnviar.map(a => String(a.linea));
+  
+  if(lineas.length > 0) {
+    enviarAvisosMasivo(lineas);
+  }
 }
