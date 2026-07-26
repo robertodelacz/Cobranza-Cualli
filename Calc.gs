@@ -2,23 +2,13 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *  COBRANZA PREVENTIVA — Motor de Cálculo (Calc.gs)
  * ═══════════════════════════════════════════════════════════════════════════
- *  Replica las fórmulas de la Hoja 1 vieja, con match exacto por línea
- *  y manejo explícito de datos faltantes.
- *
- *  ESTRUCTURA REP1 (Cache_Rep1, 10 cols):
- *    A: Fecha Vencimiento  B: Línea  C: Nombre  D: Capital  E: Interés
- *    F: Otros  G: IVA  H: Importe  I: Moneda
- *
- *  MODO PRUEBA (controlable desde Config):
- *    Cuando MODO_PRUEBA = TRUE: cualquier línea con venc ≥ mañana → T-1 enviable.
- *    Cuando MODO_PRUEBA = FALSE: solo días=5/1/0 son enviables.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
 // ─── CONSTANTES DEL DOMINIO ────────────────────────────────────────────────
 const FACTOR_TASA_MORATORIA = 2;
 const BASE_DIAS_ANIO = 360;
-const VENTANA_DIAS_AVISO_DEFAULT = 5;
+const VENTANA_DIAS_AVISO_DEFAULT = 9;
 
 // Mapeo Días → Tipo de Aviso (modo producción)
 const TIPO_AVISO = { 5: 'T-5', 1: 'T-1', 0: 'T+0' };
@@ -140,10 +130,10 @@ function calcularAvisos() {
     if (!rep1Sheet || !rep9Sheet) {
       return { ok: false, error: 'Hojas de cache no encontradas.' };
     }
-    if (rep1Sheet.getLastRow() < 5) {
+    if (rep1Sheet.getLastRow() < 9) {
       return { ok: false, error: 'No hay Rep1 cargado.' };
     }
-    if (rep9Sheet.getLastRow() < 5) {
+    if (rep9Sheet.getLastRow() < 9) {
       return { ok: false, error: 'No hay Rep9 cargado.' };
     }
 
@@ -153,7 +143,7 @@ function calcularAvisos() {
       : getVentanaDiasAviso_();
 
     // Leer datos
-    const rep1Data = leerCache_(rep1Sheet, 9);   // 9 cols del nuevo Cache_Rep1
+    const rep1Data = leerCache_(rep1Sheet, 9);  
     const rep9Data = leerCache_(rep9Sheet, 30);
     const tasasMap = leerTasas_(ss);
     const correosMap = leerCorreos_(ss);
@@ -182,7 +172,7 @@ function calcularAvisos() {
         continue;
       }
 
-      if (fechaVenc.getTime() > limiteFecha.getTime()) continue;
+
 
       const dias = diferenciaDias_(fechaReporte, fechaVenc);
 
@@ -194,7 +184,7 @@ function calcularAvisos() {
         else { tipoAviso = 'Vencido'; elegibleAviso = false; }
       } else {
         tipoAviso = TIPO_AVISO[dias] || (dias < 0 ? 'Vencido' : 'Fuera de rango');
-        elegibleAviso = (dias === 5 || dias === 1 || dias === 0);
+        elegibleAviso = (dias === 9 || dias === 5 || dias === 0);
       }
 
       // ─── CÁLCULOS ───
@@ -229,19 +219,20 @@ function calcularAvisos() {
       const total = capital + intereses + otros + iva +
                     capVencido + intVencidos + moratoriosAcum + moratoriosPeriodo;
 
-      const contacto = correosMap.get(linea) || {};
+const contacto = correosMap.get(linea) || {};
 
       avisos.push({
         linea: linea,
         nombre: r[REP1.NOMBRE] || (r9 ? r9[REP9.NOMBRE] : '') || '',
         fechaVenc: fechaVenc.toISOString(),
+        fechaPagoReal: obtenerDiaHabilSiguiente_(fechaVenc).toISOString(), // <-- AQUÍ RECUPERAMOS EL DÍA HÁBIL
         dias: dias,
         tipoAviso: tipoAviso,
         elegibleAviso: elegibleAviso,
         sinRep9: sinRep9,
         sinTasa: !tasaInfo,
         sinCorreo: !contacto.correo,
-        moneda: moneda,                  // ← NUEVO: MXN o USD
+        moneda: moneda,                  
         capital: capital,
         intereses: intereses,
         otros: otros,
@@ -270,42 +261,31 @@ function calcularAvisos() {
     });
 
     const elegibles = avisos.filter(a => a.elegibleAviso);
-    const stats = {
+      const stats = {
       total: avisos.length,
-      elegibles: elegibles.length,
-      porTipo: {
-        'T-5': elegibles.filter(a => a.tipoAviso === 'T-5').length,
-        'T-1': elegibles.filter(a => a.tipoAviso === 'T-1').length,
-        'T+0': elegibles.filter(a => a.tipoAviso === 'T+0').length
-      },
-      porMoneda: {
-        'MXN': elegibles.filter(a => a.moneda === 'MXN').length,
-        'USD': elegibles.filter(a => a.moneda === 'USD').length
-      },
-      sumaTotalMXN: round2_(elegibles.filter(a => a.moneda === 'MXN').reduce((s, a) => s + a.total, 0)),
-      sumaTotalUSD: round2_(elegibles.filter(a => a.moneda === 'USD').reduce((s, a) => s + a.total, 0)),
-      sumaCapVencido: round2_(elegibles.reduce((s, a) => s + a.capVencido, 0)),
-      sumaMoratorios: round2_(elegibles.reduce((s, a) => s + a.moratoriosAcum + a.moratoriosPeriodo, 0)),
-      sinRep9: elegibles.filter(a => a.sinRep9).length,
-      sinCorreo: elegibles.filter(a => a.sinCorreo).length,
-      sinTasa: elegibles.filter(a => a.sinTasa).length
+      elegibles: avisos.length, // Ahora pasamos todos al dashboard
+      sumaTotalMXN: round2_(avisos.filter(a => a.moneda === 'MXN').reduce((s, a) => s + a.total, 0)),
+      sumaTotalUSD: round2_(avisos.filter(a => a.moneda === 'USD').reduce((s, a) => s + a.total, 0)),
+      sumaCapVencido: round2_(avisos.reduce((s, a) => s + a.capVencido, 0)),
+      sumaMoratorios: round2_(avisos.reduce((s, a) => s + a.moratoriosAcum + a.moratoriosPeriodo, 0)),
+      sinRep9: avisos.filter(a => a.sinRep9).length,
+      sinCorreo: avisos.filter(a => a.sinCorreo).length,
+      sinTasa: avisos.filter(a => a.sinTasa).length
     };
 
     return {
       ok: true,
       modoPrueba: modoPrueba,
       ventanaDias: ventanaDias,
-      fechaReporte: fechaReporte.toISOString(),
+      fechaReporte: fechaReporte.toISOString(), // <-- Variable corregida
       avisos: avisos,
       stats: stats,
       warnings: warnings.slice(0, 50)
     };
-
   } catch (err) {
     return { ok: false, error: err.message, stack: err.stack };
   }
 }
-
 // ─── HELPERS DE LECTURA ────────────────────────────────────────────────────
 
 function leerCache_(sheet, numCols) {
@@ -369,14 +349,34 @@ function num_(v) {
 
 function parseFecha_(v) {
   if (!v) return null;
+  
+  // 1. Si Google Sheets ya lo reconoce como un objeto de fecha válido
   if (v instanceof Date) {
     if (isNaN(v.getTime())) return null;
     return new Date(v.getFullYear(), v.getMonth(), v.getDate());
   }
+  
   if (typeof v === 'string') {
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) {
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    // 2. Si viene como ISO String desde nuestro arreglo en el frontend (ej. 2026-06-06T...)
+    if (v.includes('T')) {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    
+    // 3. Si viene con el año primero (YYYY-MM-DD)
+    if (v.match(/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/)) {
+      const partes = v.split(/[\/\-]/);
+      return new Date(parseInt(partes[0], 10), parseInt(partes[1], 10) - 1, parseInt(partes[2], 10));
+    }
+    
+    // 4. Si viene en formato manual DD/MM/YY o DD-MM-YYYY
+    const partes = v.split(/[\/\-]/); 
+    if (partes.length === 3) {
+      const dia = parseInt(partes[0], 10);
+      const mes = parseInt(partes[1], 10) - 1; 
+      const anio = parseInt(partes[2], 10);
+      const anioFull = anio < 100 ? 2000 + anio : anio;
+      return new Date(anioFull, mes, dia);
     }
   }
   return null;
