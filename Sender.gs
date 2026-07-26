@@ -42,14 +42,15 @@ function previsualizarCorreo(linea) {
 /**
  * Envía 1 correo y registra en bitácora.
  */
-function enviarAvisoIndividual(linea) {
+function enviarAvisoIndividual(linea, forzarReenvio = false) {
   try {
     const aviso = obtenerAvisoPorLinea_(linea);
     if (!aviso) {
       return { ok: false, error: `Línea ${linea} no encontrada.` };
     }
 
-    const validacion = validarEnvio_(aviso);
+    // Le pasamos el parámetro forzarReenvio a la validación
+    const validacion = validarEnvio_(aviso, forzarReenvio);
     if (!validacion.ok) {
       return { ok: false, error: validacion.error, validacion: validacion };
     }
@@ -126,21 +127,31 @@ function enviarAvisosMasivo(lineas) {
  * Ejecuta GmailApp.sendEmail y registra en bitácora.
  * Asume que ya pasó la validación.
  */
+/**
+ * Ejecuta MailApp.sendEmail y registra en bitácora.
+ * Asume que ya pasó la validación.
+ */
 function ejecutarEnvio_(aviso) {
   const correo = construirCorreoAviso(aviso);
   const cc = leerCcFijo_();
   const destinatariosStr = correo.destinatarios.join(',');
 
+  // ─── EL TRUCO MAESTRO: Codificación UTF-8 Base64 (RFC 2047) ───
+  const bytes = Utilities.newBlob(correo.asunto).getBytes();
+  const asuntoSeguro = "=?UTF-8?B?" + Utilities.base64Encode(bytes) + "?=";
+
   try {
-    GmailApp.sendEmail(
+    // Cambiamos GmailApp por MailApp
+    MailApp.sendEmail(
       destinatariosStr,
-      correo.asunto,
+      asuntoSeguro, 
       correo.plainBody,
       {
         htmlBody: correo.htmlBody,
         cc: cc,
         name: 'Financiera Cualli',
-        replyTo: Session.getActiveUser().getEmail()
+        noReply: true,  // <--- AQUÍ ESTÁ LA MAGIA QUE RECORDABAS
+        replyTo: Session.getActiveUser().getEmail() 
       }
     );
 
@@ -157,13 +168,12 @@ function ejecutarEnvio_(aviso) {
     return { ok: false, error: err.message };
   }
 }
-
 // ─── VALIDACIONES ──────────────────────────────────────────────────────────
 
 /**
- * Valida que el aviso pueda enviarse: tiene STP, tiene correo, no se ha enviado hoy.
+ * Valida que el aviso pueda enviarse.
  */
-function validarEnvio_(aviso) {
+function validarEnvio_(aviso, forzarReenvio = false) {
   // 1. Cuenta STP
   if (!aviso.cuentaSTP || String(aviso.cuentaSTP).trim() === '') {
     return { ok: false, error: 'Sin cuenta STP en el catálogo Correos.' };
@@ -176,21 +186,17 @@ function validarEnvio_(aviso) {
   }
 
   // 3. No haber enviado el mismo aviso hoy (anti-doble envío)
-  if (yaEnviadoHoy_(aviso.linea, aviso.tipoAviso)) {
+  // FIX: Si forzarReenvio es verdadero, se salta este bloqueo
+  if (!forzarReenvio && yaEnviadoHoy_(aviso.linea, aviso.tipoAviso)) {
     return {
       ok: false,
       error: `Aviso ${aviso.tipoAviso} para esta línea ya fue enviado hoy. Si quieres reenviar, hazlo desde la bitácora.`
     };
   }
 
-  // 4. Tipo de aviso elegible
-  if (!aviso.elegibleAviso) {
-    return { ok: false, error: 'Tipo de aviso fuera de rango (T-5, T-1, T+0).' };
-  }
 
   return { ok: true };
 }
-
 /**
  * Revisa la bitácora para ver si la línea + tipo ya se enviaron hoy.
  */
