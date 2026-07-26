@@ -5,6 +5,29 @@
   <base target="_top">
   <title>Cobranza Preventiva · Cualli</title>
   <?!= include('styles'); ?>
+  <style>
+    .app-main {
+      max-width: 96% !important; 
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      width: 100%;
+    }
+
+    .dash-table {
+      width: 100%;
+      min-width: 1500px; /* Asegura que las 13 columnas quepan holgadamente */
+    }
+
+    /* Darle un respiro a las columnas numéricas (capital, intereses, etc.) */
+    .dash-table th.amount,
+    .dash-table td.amount {
+      min-width: 105px;
+      padding-left: 8px !important;
+      padding-right: 8px !important;
+    }
+  </style>
 </head>
 <body>
 
@@ -13,7 +36,7 @@
       <div class="logo-mark">C</div>
       <div class="header-titles">
         <h1>Cobranza Preventiva</h1>
-        <p class="subtitle">Financiera Cualli · Contraloría</p>
+        <p class="subtitle">Financiera Cualli</p>
       </div>
     </div>
     <div class="header-right">
@@ -219,9 +242,9 @@
     <div class="dash-filters" id="dashFilters" hidden>
       <div class="filter-pills" id="filterPills">
         <button class="filter-pill active" data-filter="all">Todos</button>
-        <button class="filter-pill" data-filter="T-5">T-5</button>
-        <button class="filter-pill" data-filter="T-1">T-1</button>
-        <button class="filter-pill" data-filter="T+0">T+0</button>
+        <button class="filter-pill" data-filter=">5">> 5 días</button>
+        <button class="filter-pill" data-filter="5">5 días</button>
+        <button class="filter-pill" data-filter="<5">< 5 días</button>
         <button class="filter-pill" data-filter="warn">Solo con warnings</button>
       </div>
       <input type="search" class="filter-search" id="filterSearch" placeholder="Buscar línea o cliente…">
@@ -249,22 +272,24 @@
 
     <div class="table-wrap" id="tableWrap" hidden>
       <table class="dash-table" id="dashTable">
-        <thead>
+<thead>
           <tr>
             <th class="col-check"><input type="checkbox" id="checkAll" title="Seleccionar todos"></th>
             <th>Aviso</th>
             <th>Vencim.</th>
             <th>Línea</th>
             <th>Cliente</th>
-            <th class="amount">Capital</th>
-            <th class="amount">Cap. Venc.</th>
-            <th class="amount">Moratorios</th>
+            <th class="amount">Cap. Vigente</th>
+            <th class="amount">Cap. Vencido</th>
+            <th class="amount">Int. Vigente</th>
+            <th class="amount">Int. Vencido</th>
+            <th class="amount">Mor. Vencidos</th>
+            <th class="amount">Mor. Periodo</th>
             <th class="amount">Total</th>
             <th>Mon.</th>
             <th>Acciones</th>
           </tr>
-        </thead>
-        <tbody id="dashTbody"></tbody>
+        </thead>        <tbody id="dashTbody"></tbody>
       </table>
       <div class="table-empty" id="tableEmpty" hidden>
         Ningún aviso coincide con los filtros activos.
