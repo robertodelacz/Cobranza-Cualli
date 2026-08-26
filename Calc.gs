@@ -8,7 +8,7 @@
 // ─── CONSTANTES DEL DOMINIO ────────────────────────────────────────────────
 const FACTOR_TASA_MORATORIA = 2;
 const BASE_DIAS_ANIO = 360;
-const VENTANA_DIAS_AVISO_DEFAULT = 9;
+const VENTANA_DIAS_AVISO_DEFAULT = 10;
 
 // Mapeo Días → Tipo de Aviso (modo producción)
 const TIPO_AVISO = { 5: 'T-5', 1: 'T-1', 0: 'T+0' };
