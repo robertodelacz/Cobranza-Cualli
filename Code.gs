@@ -562,12 +562,14 @@ function colToLetter_(col) {
 function cronEnvioDiario() {
   const calculo = calcularAvisos();
   if (!calculo.ok) return; // Podrías enviarte un correo a ti mismo avisando que falló el cálculo
-  
-  // Buscar a los que hoy cumplen la condición exacta de T-5 o T-1
-  const avisosAEnviar = calculo.avisos.filter(a => a.dias === 5 || a.dias === 1);
+
+  // La bitácora decide, no el día exacto: manda el aviso previo (ventana 1–5
+  // días, primera vez que se ve la cuota) o el de víspera (día 1, si ya
+  // pasó la separación mínima desde el previo). Ver accionSugerida en Calc.gs.
+  const avisosAEnviar = calculo.avisos.filter(a => a.accionSugerida === 'PREVENTIVO' || a.accionSugerida === 'VISPERA');
   const lineas = avisosAEnviar.map(a => String(a.linea));
-  
-  if(lineas.length > 0) {
+
+  if (lineas.length > 0) {
     enviarAvisosMasivo(lineas);
   }
 }
