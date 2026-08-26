@@ -130,10 +130,10 @@ function calcularAvisos() {
     if (!rep1Sheet || !rep9Sheet) {
       return { ok: false, error: 'Hojas de cache no encontradas.' };
     }
-    if (rep1Sheet.getLastRow() < 9) {
+    if (rep1Sheet.getLastRow() < 5) {
       return { ok: false, error: 'No hay Rep1 cargado.' };
     }
-    if (rep9Sheet.getLastRow() < 9) {
+    if (rep9Sheet.getLastRow() < 5) {
       return { ok: false, error: 'No hay Rep9 cargado.' };
     }
 
