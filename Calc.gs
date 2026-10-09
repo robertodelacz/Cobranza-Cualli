@@ -10,8 +10,16 @@ const FACTOR_TASA_MORATORIA = 2;
 const BASE_DIAS_ANIO = 360;
 const VENTANA_DIAS_AVISO_DEFAULT = 10;
 
-// Mapeo Días → Tipo de Aviso (modo producción)
-const TIPO_AVISO = { 5: 'T-5', 1: 'T-1', 0: 'T+0' };
+// ─── AVISOS: PRIMER CONTACTO (PREVENTIVO) + VÍSPERA ────────────────────────
+// El envío ya NO depende de "hoy vencen exactamente en N días": depende de
+// la bitácora. Cada cuota (línea + fecha de vencimiento) recibe UN aviso
+// preventivo la primera vez que la vemos con 1–5 días restantes —así entre
+// hoy y mañana o el reporte se cargue tarde, el cliente nunca deja de tener
+// aviso previo— y, si alcanza a quedar 1 día antes de vencer, un aviso de
+// víspera adicional (salvo que el previo se haya mandado demasiado cerca).
+const VENTANA_AVISO_MIN_DIAS = 1;
+const VENTANA_AVISO_MAX_DIAS = 5;
+const SEPARACION_MINIMA_DIAS_DEFAULT = 2; // mínimo de días entre aviso previo y víspera
 
 // ─── ÍNDICES DE COLUMNAS Cache_Rep1 (NUEVA estructura: 10 cols) ────────────
 const REP1 = {
@@ -119,6 +127,34 @@ function getVentanaDiasAviso_() {
   }
 }
 
+function getSeparacionMinimaDias_() {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sh = ss.getSheetByName(SHEETS.CONFIG);
+    if (!sh) return SEPARACION_MINIMA_DIAS_DEFAULT;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 3) return SEPARACION_MINIMA_DIAS_DEFAULT;
+    const data = sh.getRange(3, 1, lastRow - 2, 2).getValues();
+    for (const row of data) {
+      if (String(row[0]).trim() === 'SEPARACION_MINIMA_DIAS') {
+        const n = Number(row[1]);
+        return (isNaN(n) || n < 0) ? SEPARACION_MINIMA_DIAS_DEFAULT : Math.round(n);
+      }
+    }
+    // Crear si no existe
+    const newRow = sh.getLastRow() + 1;
+    sh.getRange(newRow, 1, 1, 3).setValues([[
+      'SEPARACION_MINIMA_DIAS', SEPARACION_MINIMA_DIAS_DEFAULT,
+      'Días mínimos entre el aviso previo y el de víspera (1 = víspera siempre sale; 2 = se suprime si el previo salió apenas ayer).'
+    ]]);
+    sh.getRange(newRow, 2).setBackground('#FFF8E1');
+    sh.getRange(newRow, 1).setFontWeight('bold');
+    return SEPARACION_MINIMA_DIAS_DEFAULT;
+  } catch (err) {
+    return SEPARACION_MINIMA_DIAS_DEFAULT;
+  }
+}
+
 // ─── API PRINCIPAL ─────────────────────────────────────────────────────────
 
 function calcularAvisos() {
@@ -130,10 +166,10 @@ function calcularAvisos() {
     if (!rep1Sheet || !rep9Sheet) {
       return { ok: false, error: 'Hojas de cache no encontradas.' };
     }
-    if (rep1Sheet.getLastRow() < 9) {
+    if (rep1Sheet.getLastRow() < 5) {
       return { ok: false, error: 'No hay Rep1 cargado.' };
     }
-    if (rep9Sheet.getLastRow() < 9) {
+    if (rep9Sheet.getLastRow() < 5) {
       return { ok: false, error: 'No hay Rep9 cargado.' };
     }
 
@@ -143,10 +179,12 @@ function calcularAvisos() {
       : getVentanaDiasAviso_();
 
     // Leer datos
-    const rep1Data = leerCache_(rep1Sheet, 9);  
+    const rep1Data = leerCache_(rep1Sheet, 9);
     const rep9Data = leerCache_(rep9Sheet, 30);
     const tasasMap = leerTasas_(ss);
     const correosMap = leerCorreos_(ss);
+    const bitacoraMap = leerBitacoraAvisos_(ss);
+    const separacionMinimaDias = getSeparacionMinimaDias_();
 
     const rep9Map = new Map();
     for (const r of rep9Data) {
@@ -177,14 +215,36 @@ function calcularAvisos() {
       const dias = diferenciaDias_(fechaReporte, fechaVenc);
 
       // ─── DETERMINAR TIPO DE AVISO ───
-      let tipoAviso, elegibleAviso;
+      // La bitácora (no el día exacto) decide si ya se avisó esta cuota.
+      // Ventana abierta 1–5 días: el primer aviso sale el primer día que
+      // vemos la cuota dentro de ese rango, sin importar si entró al
+      // padrón con 5, 4, 3 o 2 días restantes. La víspera (día 1) es aparte
+      // y respeta una separación mínima contra el aviso previo.
+      const registroBitacora = bitacoraMap.get(linea + '|' + fechaKey_(fechaVenc)) ||
+        { previoFecha: null, visperaFecha: null };
+
+      let tipoAviso, elegibleAviso, accionSugerida;
       if (modoPrueba) {
-        if (dias >= 1) { tipoAviso = 'T-1'; elegibleAviso = true; }
-        else if (dias === 0) { tipoAviso = 'T+0'; elegibleAviso = true; }
-        else { tipoAviso = 'Vencido'; elegibleAviso = false; }
+        if (dias >= 1) { tipoAviso = 'T-1'; elegibleAviso = true; accionSugerida = 'PREVENTIVO'; }
+        else if (dias === 0) { tipoAviso = 'T+0'; elegibleAviso = true; accionSugerida = 'VISPERA'; }
+        else { tipoAviso = 'Vencido'; elegibleAviso = false; accionSugerida = 'NINGUNA'; }
+      } else if (dias < 0) {
+        tipoAviso = 'Vencido'; elegibleAviso = false; accionSugerida = 'NINGUNA';
+      } else if (dias === 0) {
+        // Vencimiento del día: sale del flujo preventivo → pasa a cobranza.
+        tipoAviso = 'Vencido'; elegibleAviso = false; accionSugerida = 'NINGUNA';
+      } else if (dias >= VENTANA_AVISO_MIN_DIAS && dias <= VENTANA_AVISO_MAX_DIAS && !registroBitacora.previoFecha) {
+        tipoAviso = 'PREVENTIVO'; elegibleAviso = true; accionSugerida = 'PREVENTIVO';
+      } else if (
+        dias === 1 &&
+        registroBitacora.previoFecha &&
+        !registroBitacora.visperaFecha &&
+        diferenciaDias_(soloFecha_(registroBitacora.previoFecha), fechaReporte) >= separacionMinimaDias
+      ) {
+        tipoAviso = 'VISPERA'; elegibleAviso = true; accionSugerida = 'VISPERA';
       } else {
-        tipoAviso = TIPO_AVISO[dias] || (dias < 0 ? 'Vencido' : 'Fuera de rango');
-        elegibleAviso = (dias === 9 || dias === 5 || dias === 0);
+        tipoAviso = dias > VENTANA_AVISO_MAX_DIAS ? 'Fuera de rango' : 'Ya avisado';
+        elegibleAviso = false; accionSugerida = 'NINGUNA';
       }
 
       // ─── CÁLCULOS ───
@@ -229,6 +289,9 @@ const contacto = correosMap.get(linea) || {};
         dias: dias,
         tipoAviso: tipoAviso,
         elegibleAviso: elegibleAviso,
+        accionSugerida: accionSugerida,
+        avisoPrevioFecha: registroBitacora.previoFecha ? registroBitacora.previoFecha.toISOString() : null,
+        avisoVisperaFecha: registroBitacora.visperaFecha ? registroBitacora.visperaFecha.toISOString() : null,
         sinRep9: sinRep9,
         sinTasa: !tasaInfo,
         sinCorreo: !contacto.correo,
@@ -287,6 +350,69 @@ const contacto = correosMap.get(linea) || {};
   }
 }
 // ─── HELPERS DE LECTURA ────────────────────────────────────────────────────
+
+/**
+ * Lee Bitacora_Envios y arma un mapa {linea|fechaVenc → {previoFecha, visperaFecha}}
+ * con la fecha (Date) del envío ENVIADO más antiguo de cada tipo. Es lo que hace
+ * idempotente el proceso: correr calcularAvisos() dos veces no reenvía nada,
+ * y una cuota que entra tarde al padrón (3 o 2 días antes) no se pierde su
+ * aviso previo aunque nunca haya cruzado por "5 días exactos".
+ */
+function leerBitacoraAvisos_(ss) {
+  const map = new Map();
+  const sh = ss.getSheetByName(SHEETS.BITACORA);
+  if (!sh) return map;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 3) return map;
+
+  const data = sh.getRange(3, 1, lastRow - 2, 9).getValues();
+  // Cols: 0:Timestamp 1:FechaVenc 2:TipoAviso 3:Linea 4:Cliente 5:Correos 6:Total 7:Status 8:Mensaje
+
+  for (const row of data) {
+    if (String(row[7]) !== 'ENVIADO') continue;
+
+    const linea = normLinea_(row[3]);
+    const fechaVenc = row[1] instanceof Date ? row[1] : null;
+    const ts = row[0] instanceof Date ? row[0] : null;
+    if (!linea || !fechaVenc || !ts) continue;
+
+    const key = linea + '|' + fechaKey_(fechaVenc);
+    let entry = map.get(key);
+    if (!entry) {
+      entry = { previoFecha: null, visperaFecha: null };
+      map.set(key, entry);
+    }
+
+    const tipo = String(row[2] || '');
+    if (esTipoPrevio_(tipo)) {
+      if (!entry.previoFecha || ts < entry.previoFecha) entry.previoFecha = ts;
+    } else if (esTipoVispera_(tipo)) {
+      if (!entry.visperaFecha || ts < entry.visperaFecha) entry.visperaFecha = ts;
+    }
+  }
+
+  return map;
+}
+
+// 'T-5' se deja por compatibilidad con bitácora histórica previa a este cambio.
+function esTipoPrevio_(tipo) {
+  return tipo === 'PREVENTIVO' || tipo === 'T-5';
+}
+
+// 'T-1' y 'T+0' se dejan por compatibilidad con bitácora histórica previa a este cambio.
+function esTipoVispera_(tipo) {
+  return tipo === 'VISPERA' || tipo === 'T-1' || tipo === 'T+0';
+}
+
+// Llave estable linea+fecha en componentes LOCALES (evita corrimientos por huso horario).
+function fechaKey_(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function soloFecha_(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
 
 function leerCache_(sheet, numCols) {
   const lastRow = sheet.getLastRow();
