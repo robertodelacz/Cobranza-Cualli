@@ -342,6 +342,13 @@ function badgeDias(dias) {
   return `<span class="aviso-badge aviso-red">${dias} días</span>`;
 }
 
+function badgeTipoAviso(tipoAviso) {
+  const cls = tipoAviso === 'VISPERA' || tipoAviso === 'T-1' || tipoAviso === 'T+0'
+    ? 'aviso-red'
+    : 'aviso-yellow';
+  return `<span class="aviso-badge ${cls}">${escapeHtml(tipoAviso || '—')}</span>`;
+}
+
 function isEnviable(a) {
   return !a.sinRep9 && !!a.cuentaSTP && !!a.correo && !a.sinCorreo;
 }
@@ -645,7 +652,7 @@ function renderBitacora() {
     return `
       <tr>
         <td>${tsTxt}</td>
-        <td>${badgeDias(r.tipoAviso)}</td> 
+        <td>${badgeTipoAviso(r.tipoAviso)}</td>
         <td>${escapeHtml(r.linea)}</td>
         <td class="cell-name">${escapeHtml(truncate(r.cliente, 30))}</td>
         <td class="amount total">${formatNumber(r.total)}</td>
