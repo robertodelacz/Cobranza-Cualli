@@ -63,7 +63,7 @@ function build(opts) {
     HtmlService: {},
     __HOY__: opts.hoy || ''
   });
-  loadGs(ctx, ['Config.gs', 'Calendario.gs', 'Tandas.gs', 'Datos.gs', 'Motor.gs', 'Email.gs', 'Sender.gs', 'Chat.gs', 'Setup.gs', 'Api.gs']);
+  loadGs(ctx, ['Config.gs', 'Calendario.gs', 'Tandas.gs', 'Datos.gs', 'Motor.gs', 'Email.gs', 'Sender.gs', 'Chat.gs', 'Setup.gs', 'Cartera.gs', 'Api.gs']);
   const run = s => require('vm').runInContext(s, ctx);
   return { ctx, run, sheets, mails, fetches, triggers, props, ss, setTz: z => { tz = z; }, plain: o => JSON.parse(JSON.stringify(o)) };
 }

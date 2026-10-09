@@ -145,3 +145,4 @@ vite.config.ts.timestamp-*
 # pruebas locales
 pruebas/maestro.json
 pruebas/node_modules/
+pruebas/mails_flow.json

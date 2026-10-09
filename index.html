@@ -4,55 +4,53 @@
   <meta charset="UTF-8">
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cobranza Preventiva · Cualli</title>
+  <title>Cobranza Cualli</title>
   <?!= include('styles'); ?>
 </head>
 <body>
 
-<!-- Glifos de estado: cada estado tiene su propia forma además de su color -->
+<!-- Íconos: cada estado tiene su propia forma además de su color -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="g-LISTA" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#FDB913"/><path d="M5.5 10.4l3 3 6-6.4" fill="none" stroke="#2E2E2E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="g-REVISAR" viewBox="0 0 20 20"><path d="M10 2.2L18.4 17H1.6z" fill="#FFF3D4" stroke="#FDB913" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 8v4" stroke="#7A4F00" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1.1" fill="#7A4F00"/></symbol>
-  <symbol id="g-BLOQUEADA" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3.5" fill="#B3261E"/><path d="M6.5 6.5l7 7M13.5 6.5l-7 7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></symbol>
-  <symbol id="g-PROGRAMADA" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.2" fill="#fff" stroke="#9A9A9A" stroke-width="1.8"/><path d="M10 5.5V10l3 2" fill="none" stroke="#9A9A9A" stroke-width="1.6" stroke-linecap="round"/></symbol>
-  <symbol id="g-ESPERA_VISPERA" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.2" fill="#E5E5E5" stroke="#6B6B6B" stroke-width="1.8"/><path d="M10 1.8a8.2 8.2 0 0 1 0 16.4z" fill="#6B6B6B"/></symbol>
-  <symbol id="g-COMPLETA" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#2E2E2E"/><path d="M5.5 10.4l3 3 6-6.4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="g-VENCE_HOY" viewBox="0 0 20 20"><path d="M10 1.8l8.2 8.2L10 18.2 1.8 10z" fill="#fff" stroke="#9A9A9A" stroke-width="1.8" stroke-dasharray="3 2.4"/></symbol>
-  <symbol id="g-VENCIDA" viewBox="0 0 20 20"><path d="M10 1.8l8.2 8.2L10 18.2 1.8 10z" fill="#E5E5E5" stroke="#9A9A9A" stroke-width="1.8"/></symbol>
-  <symbol id="g-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.2" fill="none" stroke="#6B6B6B" stroke-width="1.6"/><path d="M10 9v5" stroke="#6B6B6B" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="6.2" r="1.1" fill="#6B6B6B"/></symbol>
-  <symbol id="g-warn" viewBox="0 0 20 20"><path d="M10 2.2L18.4 17H1.6z" fill="#FFF3D4" stroke="#FDB913" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 8v4" stroke="#7A4F00" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1.1" fill="#7A4F00"/></symbol>
-  <symbol id="g-error" viewBox="0 0 20 20"><rect x="1.5" y="1.5" width="17" height="17" rx="3.5" fill="#B3261E"/><path d="M6.5 6.5l7 7M13.5 6.5l-7 7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></symbol>
-  <symbol id="g-ok" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#2E2E2E"/><path d="M5.5 10.4l3 3 6-6.4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-listo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#FDB913"/><path d="M6.8 12.4l3.6 3.6 6.8-7.4" fill="none" stroke="#262626" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#262626"/><path d="M6.8 12.4l3.6 3.6 6.8-7.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-warn" viewBox="0 0 24 24"><path d="M12 2.6L22.2 20.4H1.8z" fill="#FFF3CF" stroke="#FDB913" stroke-width="2" stroke-linejoin="round"/><path d="M12 9.5v5" stroke="#6B4A00" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.3" fill="#6B4A00"/></symbol>
+  <symbol id="g-error" viewBox="0 0 24 24"><rect x="1.8" y="1.8" width="20.4" height="20.4" rx="5" fill="#B3261E"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="g-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#A0A0A0" stroke-width="2"/><path d="M12 6.5V12l3.6 2.2" fill="none" stroke="#A0A0A0" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="g-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#6B6B6B" stroke-width="1.8"/><path d="M12 11v6" stroke="#6B6B6B" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="#6B6B6B"/></symbol>
+  <symbol id="g-subir" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17" fill="none" stroke="#262626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-abajo" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-der" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
 </svg>
 
-<div id="app">
-  <aside class="riel">
-    <div class="marca">
-      <span class="marca-sello">C</span>
-      <span class="marca-nombre">Cobranza preventiva<small>Financiera Cualli</small></span>
-    </div>
+<header class="barra">
+  <div class="barra-in">
+    <a class="marca" href="#" onclick="return false"><span class="marca-sello">C</span><span class="marca-nombre">Cobranza<br>Cualli</span></a>
     <nav class="nav" id="nav" aria-label="Secciones">
-      <button data-nav="hoy">Hoy<span class="cuenta oculto" id="cuenta-hoy"></span></button>
-      <button data-nav="cola">Cola de envío<span class="cuenta oculto" id="cuenta-cola"></span></button>
-      <button data-nav="bitacora">Bitácora</button>
+      <button data-nav="hoy">Hoy</button>
+      <button data-nav="avisos">Avisos<span class="cuenta oculto" id="cuenta-avisos"></span></button>
+      <button data-nav="cartera">Cartera</button>
+      <button data-nav="historial">Historial</button>
       <button data-nav="ajustes">Ajustes de saldo<span class="cuenta oculto" id="cuenta-ajustes"></span></button>
-      <button data-nav="catalogos">Catálogos<span class="cuenta rojo oculto" id="cuenta-catalogos"></span></button>
+      <button data-nav="datos">Datos de clientes<span class="cuenta rojo oculto" id="cuenta-datos"></span></button>
       <button data-nav="config">Configuración</button>
     </nav>
-    <div class="riel-pie"><strong id="yo-correo">…</strong><span id="yo-rol"></span><br><span id="version"></span></div>
-  </aside>
+    <div class="yo"><strong id="yo-correo">…</strong><span id="yo-rol"></span></div>
+  </div>
+</header>
 
-  <main>
-    <div id="banners"></div>
-    <section class="seccion" id="v-hoy"></section>
-    <section class="seccion oculto" id="v-cola"></section>
-    <section class="seccion oculto" id="v-bitacora"></section>
-    <section class="seccion oculto" id="v-ajustes"></section>
-    <section class="seccion oculto" id="v-catalogos"></section>
-    <section class="seccion oculto" id="v-config"></section>
-  </main>
-</div>
+<div class="banners" id="banners"></div>
 
+<main>
+  <section class="seccion" id="v-hoy"></section>
+  <section class="seccion oculto pagina" id="v-avisos"></section>
+  <section class="seccion oculto pagina" id="v-cartera"></section>
+  <section class="seccion oculto pagina" id="v-historial"></section>
+  <section class="seccion oculto pagina" id="v-ajustes"></section>
+  <section class="seccion oculto pagina" id="v-datos"></section>
+  <section class="seccion oculto pagina" id="v-config"></section>
+</main>
+
+<div id="lateral-root"></div>
 <div id="modal-root"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 

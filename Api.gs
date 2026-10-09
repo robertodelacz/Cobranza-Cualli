@@ -164,18 +164,7 @@ function resumenEnChat(res, bloqueadas) {
 function getBitacora(f) {
   return envolver_(() => {
     f = f || {};
-    const sh = spreadsheet_().getSheetByName(SHEETS.BITACORA);
-    if (!sh || sh.getLastRow() < 3) return { ok: true, registros: [] };
-    const limite = Math.max(50, Math.min(2000, Number(f.limite) || 400));
-    const filas = Math.min(limite, sh.getLastRow() - 2);
-    const ini = sh.getLastRow() - filas + 1;
-    let regs = sh.getRange(ini, 1, filas, BITACORA_COLS).getValues().map(r => ({
-      timestamp: Object.prototype.toString.call(r[0]) === '[object Date]' ? Utilities.formatDate(r[0], TZ, "yyyy-MM-dd'T'HH:mm:ss") : '',
-      fechaVenc: fechaKeyDeHoja_(r[1]) || '', tipo: String(r[2] || ''), linea: String(r[3] || ''), cliente: String(r[4] || ''),
-      correos: String(r[5] || ''), total: num_(r[6]), status: String(r[7] || ''), mensaje: String(r[8] || ''),
-      usuario: String(r[9] || ''), corteRep1: String(r[10] || ''), corteRep9: String(r[11] || ''), moneda: String(r[12] || 'MXN'),
-      diasHab: r[13], origen: String(r[17] || ''), pagoEfectivo: fechaKeyDeHoja_(r[19]) || ''
-    }));
+    let regs = bitacoraRegistros_(Math.max(50, Math.min(2000, Number(f.limite) || 400)));
     if (f.status) regs = regs.filter(x => x.status === f.status);
     if (f.texto) { const q = String(f.texto).toLowerCase(); regs = regs.filter(x => (x.linea + ' ' + x.cliente + ' ' + x.correos).toLowerCase().indexOf(q) >= 0); }
     if (f.desde) regs = regs.filter(x => x.timestamp.slice(0, 10) >= f.desde);
@@ -437,3 +426,10 @@ function setFechaSimulada(k) {
     return { ok: true };
   });
 }
+
+// ─── CARTERA Y FICHA DE CLIENTE ────────────────────────────────────────────
+
+function getCartera() { return envolver_(() => armarCartera_()); }
+function getFichaCliente(linea) { return envolver_(() => armarFichaCliente_(linea)); }
+function calcularSaldoAFecha(linea, fecha) { return envolver_(() => calcularSaldoAFecha_(linea, String(fecha || ''))); }
+function getResumenInicio() { return envolver_(() => armarResumenInicio_()); }
