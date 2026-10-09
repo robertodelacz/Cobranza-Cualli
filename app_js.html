@@ -1,702 +1,777 @@
 <script>
-/* ═══════════════════════════════════════════════════════════════════
-   COBRANZA PREVENTIVA · FRONTEND JS · MASTER UNIFICADO
-   ═══════════════════════════════════════════════════════════════════ */
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════════════
+   COBRANZA PREVENTIVA v2 · Front
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-const state = {
-  rep1: { rows: null, validation: null },
-  rep9: { rows: null, validation: null },
-  pendingTarget: null,
-  avisos: [],
-  stats: null,
-  fechaReporte: null,
-  warnings: [],
-  filterTipo: 'all',
-  filterSearch: '',
-  selected: new Set(),
-  currentPreviewLinea: null,
-  bitacora: []
+const S = {
+  estado: null, cola: null, vista: 'hoy', filtro: 'enviar', busqueda: '',
+  sel: new Set(), abiertas: new Set(), subida: { rep1: null, rep9: null },
+  bitacora: null, ajustes: null, catalogos: null, catLista: 'sinTasa', config: null,
+  filtroBit: { status: '', texto: '' }, cargandoCola: false
 };
 
-// ─── 1. INICIALIZACIÓN (BOOTSTRAP) ─────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  initDateDisplay();
-  initNav();
-  initDropzones();
-  initModals();
-  initDashboard();
-  initBitacora();
-  loadInitialState();
-});
+const DOW = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const DOW_L = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const MES_L = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-function initDateDisplay() {
-  const today = new Date();
-  const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
-  const txt = today.toLocaleDateString('es-MX', opts);
-  document.getElementById('dateDisplay').textContent = txt.charAt(0).toUpperCase() + txt.slice(1);
-}
+const ETIQUETA = {
+  LISTA: 'Lista para enviar', REVISAR: 'Revisar antes de enviar', BLOQUEADA: 'Bloqueada', PROGRAMADA: 'Programada',
+  ESPERA_VISPERA: 'Espera el aviso 2', COMPLETA: 'Completa', VENCE_HOY: 'Vence hoy', VENCIDA: 'Vencida'
+};
+const ORDEN_ESTADOS = ['LISTA', 'REVISAR', 'BLOQUEADA', 'PROGRAMADA', 'ESPERA_VISPERA', 'COMPLETA', 'VENCE_HOY', 'VENCIDA'];
 
-function loadInitialState() {
-  google.script.run
-    .withSuccessHandler(data => {
-      if (!data.ok) { toast(`Error inicial: ${data.error}`, 'error'); return; }
-      document.getElementById('userEmail').textContent = data.userEmail;
-      renderCacheStatus('rep1', data.rep1Status);
-      renderCacheStatus('rep9', data.rep9Status);
-    })
-    .withFailureHandler(err => toast(`No se pudo cargar el estado: ${err.message}`, 'error'))
-    .getInitialState();
-}
+/* ─── Utilidades ───────────────────────────────────────────────────────── */
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const pl = (n, uno, varios) => n + ' ' + (n === 1 ? uno : varios);
+const can = p => !!(S.estado && S.estado.permisos && S.estado.permisos.indexOf(p) >= 0);
 
-function renderCacheStatus(target, status) {
-  const valEl = document.getElementById(target === 'rep1' ? 'lastRep1' : 'lastRep9');
-  const metaEl = document.getElementById(target === 'rep1' ? 'lastRep1Meta' : 'lastRep9Meta');
-  if (!status.loaded) {
-    valEl.textContent = 'Sin cargar';
-    metaEl.textContent = 'Pendiente de subir el reporte';
-    return;
-  }
-  valEl.textContent = `${status.rowCount} registros`;
-  const d = new Date(status.timestamp);
-  const fecha = d.toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-  metaEl.textContent = `${fecha} · ${status.user}`;
-}
-
-// ─── 2. NAVEGACIÓN Y MENÚ ──────────────────────────────────────────
-function initNav() {
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', e => {
-      e.preventDefault();
-      if (item.classList.contains('disabled')) return;
-      const section = item.dataset.section;
-      switchSection(section);
-      if (section === 'envios') refreshBitacora();
-    });
-  });
-}
-
-function switchSection(section) {
-  document.querySelectorAll('.nav-item').forEach(it => it.classList.remove('active'));
-  document.querySelector(`.nav-item[data-section="${section}"]`).classList.add('active');
-  document.querySelectorAll('.section-content').forEach(s => s.hidden = true);
-  document.getElementById(`section-${section}`).hidden = false;
-}
-
-// ─── 3. CARGA DE ARCHIVOS (DROPZONES) ──────────────────────────────
-function initDropzones() {
-  ['rep1', 'rep9'].forEach(target => {
-    const dz = document.getElementById(`dropzone-${target}`);
-    const input = document.getElementById(`file-${target}`);
-    const browseBtn = document.querySelector(`.btn-browse[data-target="${target}"]`);
-
-    dz.addEventListener('click', e => {
-      if (e.target.classList.contains('btn-browse')) return;
-      input.click();
-    });
-    browseBtn.addEventListener('click', e => { e.stopPropagation(); input.click(); });
-
-    input.addEventListener('change', e => {
-      const file = e.target.files[0];
-      if (file) handleFile(file, target);
-      input.value = '';
-    });
-
-    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
-    dz.addEventListener('dragleave', e => { e.preventDefault(); dz.classList.remove('dragover'); });
-    dz.addEventListener('drop', e => {
-      e.preventDefault();
-      dz.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file, target);
-    });
-  });
-}
-
-async function handleFile(file, target) {
-  const statusEl = document.getElementById(`status-${target}`);
-  if (!/\.(xlsx|xls)$/i.test(file.name)) {
-    showCardStatus(statusEl, 'error', 'Formato no válido. Usa .xlsx o .xls');
-    return;
-  }
-  showCardStatus(statusEl, 'info', `<span class="spinner"></span> Procesando ${file.name}…`);
-  try {
-    const rows = await parseXlsx(file);
-    state[target].rows = rows;
-
+function api(fn) {
+  const args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(resolve => {
     google.script.run
-      .withSuccessHandler(validation => {
-        state[target].validation = validation;
-        if (!validation.ok) {
-          let msg = `<strong>${validation.error}</strong>`;
-          if (validation.mismatches && validation.mismatches.length) {
-            msg += '<ul>' + validation.mismatches.slice(0, 5).map(m => `<li>${escapeHtml(m)}</li>`).join('') + '</ul>';
-          }
-          showCardStatus(statusEl, 'error', msg);
-          document.getElementById(`card-${target}`).classList.add('error');
-          return;
-        }
-        showCardStatus(statusEl, 'success', `✓ <strong>${file.name}</strong> · ${validation.rowCount} registros · listo`);
-        document.getElementById(`card-${target}`).classList.remove('error');
-        document.getElementById(`dropzone-${target}`).classList.add('has-file');
-        openPreviewModal(target, file.name);
-      })
-      .withFailureHandler(err => showCardStatus(statusEl, 'error', `Error de validación: ${escapeHtml(err.message)}`))
-      [target === 'rep1' ? 'validateRep1' : 'validateRep9'](rows);
+      .withSuccessHandler(r => resolve(r))
+      .withFailureHandler(e => resolve({ ok: false, error: (e && e.message) || String(e) }))[fn].apply(null, args);
+  });
+}
 
-  } catch (err) {
-    showCardStatus(statusEl, 'error', `No se pudo leer el archivo: ${escapeHtml(err.message)}`);
+function pk(k) { const p = k.split('-').map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2])); }
+function dCorta(k) { const d = pk(k); return DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MES[d.getUTCMonth()]; }
+function dLarga(k) { const d = pk(k); return DOW_L[d.getUTCDay()] + ' ' + d.getUTCDate() + ' de ' + MES_L[d.getUTCMonth()]; }
+function dLargaAnio(k) { return dLarga(k) + ' de ' + k.slice(0, 4); }
+function dma(k) { return k ? k.slice(8, 10) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4) : ''; }
+function rangoTxt(a, b) {
+  const da = pk(a), db = pk(b);
+  if (da.getUTCMonth() === db.getUTCMonth()) return 'del ' + DOW[da.getUTCDay()] + ' ' + da.getUTCDate() + ' al ' + DOW[db.getUTCDay()] + ' ' + db.getUTCDate() + ' de ' + MES_L[db.getUTCMonth()];
+  return 'del ' + dCorta(a) + ' al ' + dCorta(b);
+}
+function dinero(n, mon) {
+  const v = Number(n) || 0;
+  const p = Math.abs(v).toFixed(2).split('.');
+  return (v < 0 ? '-' : '') + (mon === 'USD' ? 'US$' : '$') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+}
+function hora(ts) { const m = String(ts || '').match(/^(\d{4})-(\d{2})-(\d{2})\D+(\d{2}):(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] : String(ts || ''); }
+
+function toast(msg, tipo) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (tipo === 'error' ? ' error' : '');
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), tipo === 'error' ? 7000 : 4000);
+}
+
+function copiar(texto) {
+  const ok = () => toast('Copiado: ' + texto);
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(ok, () => copiarViejo(texto, ok));
+  else copiarViejo(texto, ok);
+}
+function copiarViejo(texto, ok) {
+  const t = document.createElement('textarea'); t.value = texto; t.style.position = 'fixed'; t.style.opacity = '0';
+  document.body.appendChild(t); t.select();
+  try { document.execCommand('copy'); ok(); } catch (e) { toast('No se pudo copiar. Selecciona y copia a mano: ' + texto, 'error'); }
+  t.remove();
+}
+
+/* ─── Modales ──────────────────────────────────────────────────────────── */
+function abrirModal(o) {
+  cerrarModal();
+  const velo = document.createElement('div');
+  velo.className = 'velo';
+  velo.innerHTML = '<div class="modal ' + (o.ancho ? 'ancho' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(o.titulo) + '">' +
+    '<div class="modal-cab"><h2>' + esc(o.titulo) + '</h2><button class="cerrar" aria-label="Cerrar">×</button></div>' +
+    '<div class="modal-cuerpo">' + o.cuerpo + '</div><div class="modal-pie">' + (o.pie || '') + '</div></div>';
+  velo.addEventListener('mousedown', e => { if (e.target === velo && !o.fijo) cerrarModal(); });
+  $('.cerrar', velo).addEventListener('click', cerrarModal);
+  $('#modal-root').appendChild(velo);
+  const foco = $('input, textarea, select, .btn.principal', velo);
+  if (foco) foco.focus();
+  return velo;
+}
+function cerrarModal() { $('#modal-root').innerHTML = ''; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(); });
+
+/* ─── Arranque y navegación ────────────────────────────────────────────── */
+async function arrancar() {
+  $('#v-hoy').innerHTML = '<div class="cargando"><span class="giro"></span>Cargando…</div>';
+  const e = await api('getEstadoInicial');
+  if (!e.ok) { $('#v-hoy').innerHTML = '<div class="vacio"><b>No se pudo abrir la plataforma</b>' + esc(e.error) + '</div>'; return; }
+  S.estado = e;
+  $('#yo-correo').textContent = e.usuario.email;
+  $('#yo-rol').textContent = 'Rol: ' + e.usuario.rol.toLowerCase();
+  $('#version').textContent = 'Versión ' + e.version;
+  pintarBanners();
+  irA('hoy');
+  if (e.inicializado && e.cortes.rep1.cargado && e.cortes.rep9.cargado) cargarCola(true);
+}
+
+function pintarBanners() {
+  const e = S.estado, b = [];
+  if (!e.inicializado) b.push('<div class="banner error"><svg width="18" height="18"><use href="#g-error"/></svg><span>Falta preparar el Maestro. En Apps Script ejecuta <b>inicializarV2</b> una vez y recarga esta página.</span></div>');
+  if (e.modoPrueba) b.push('<div class="banner prueba"><span>Modo prueba: los correos llegan a un buzón interno y no consumen avisos reales.' + (e.fechaSimulada ? ' Fecha simulada: ' + dLargaAnio(e.fechaSimulada) + '.' : '') + '</span></div>');
+  if (e.usuario.rol === 'SIN_ACCESO') b.push('<div class="banner error"><span>Tu cuenta (' + esc(e.usuario.email) + ') no está en la hoja Usuarios. Pide acceso al administrador.</span></div>');
+  else if (e.usuario.abierto) b.push('<div class="banner aviso"><span>La hoja Usuarios está vacía, así que todas las cuentas del dominio tienen rol de administrador. Agrega usuarios con su rol para limitar el acceso.</span></div>');
+  if (e.usuario.rol === 'AUDITORIA') b.push('<div class="banner aviso"><span>Tienes acceso de solo lectura.</span></div>');
+  $('#banners').innerHTML = b.join('');
+}
+
+function irA(v) {
+  S.vista = v;
+  $$('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.nav === v ? 'page' : 'false'));
+  ['hoy', 'cola', 'bitacora', 'ajustes', 'catalogos', 'config'].forEach(id => $('#v-' + id).classList.toggle('oculto', id !== v));
+  window.scrollTo(0, 0);
+  if (v === 'hoy') pintarHoy();
+  if (v === 'cola') pintarCola();
+  if (v === 'bitacora') cargarBitacora();
+  if (v === 'ajustes') cargarAjustes();
+  if (v === 'catalogos') cargarCatalogos();
+  if (v === 'config') cargarConfig();
+}
+$('#nav').addEventListener('click', e => { const b = e.target.closest('button[data-nav]'); if (b) irA(b.dataset.nav); });
+
+async function refrescarEstado() {
+  const e = await api('getEstadoInicial');
+  if (e.ok) { S.estado = e; pintarBanners(); }
+}
+
+function contadores() {
+  const set = (id, n, mostrar) => { const el = $('#' + id); el.textContent = n; el.classList.toggle('oculto', !mostrar); };
+  const c = S.cola && S.cola.ok ? S.cola.stats.porEnviar : 0;
+  set('cuenta-cola', c, c > 0);
+  const pend = S.ajustes ? S.ajustes.ajustes.filter(a => a.estado === 'PENDIENTE').length : 0;
+  set('cuenta-ajustes', pend, pend > 0);
+  const cat = S.catalogos ? S.catalogos.auditoria.sinCorreo.length + S.catalogos.auditoria.sinStp.length + S.catalogos.auditoria.correoInvalido.length : 0;
+  set('cuenta-catalogos', cat, cat > 0);
+}
+
+/* ═══════════════════════ HOY ═══════════════════════════════════════════════ */
+function pintarHoy() {
+  const e = S.estado; if (!e) return;
+  const t = e.tanda, v = t.ventana;
+  let titulo, sub;
+  if (!t.esHabil) {
+    titulo = 'Hoy es ' + t.motivoInhabil.toLowerCase() + ': no sale ningún aviso.';
+    sub = 'La siguiente tanda empieza el ' + dLarga(t.d0) + '.';
+  } else if (t.inicioTanda) {
+    titulo = 'Hoy toca descargar el Rep1 con vencimientos ' + rangoTxt(v.nominalDesde, v.nominalHasta) + '.';
+    const d0 = v.dias[0];
+    sub = 'Hoy salen avisos 1 para los pagos del ' + dLarga(d0.aviso1Pago) + ' y avisos 2 para los del ' + dLarga(d0.aviso2Pago) + '. Quien entre tarde a la ventana también recibe su aviso 1.';
+  } else {
+    titulo = 'Hoy no inicia una tanda nueva.';
+    sub = 'Se sigue trabajando con el Rep1 de la tanda en curso' + (t.sinAncla ? '' : '; la siguiente empieza en la fecha que marca el calendario de tandas') + '.';
   }
+  const cola = S.cola && S.cola.ok ? resumenColaHTML() : '';
+  $('#v-hoy').innerHTML =
+    '<header class="cabecera"><p class="fecha">' + dLargaAnio(t.hoy) + '</p><h1>' + esc(titulo) + '</h1><p class="sub">' + esc(sub) + '</p>' +
+    (t.esHabil && t.inicioTanda ? '<div class="acciones"><button class="btn" data-copiar="' + dma(v.nominalDesde) + '">Copiar fecha inicial ' + dma(v.nominalDesde) + '</button><button class="btn" data-copiar="' + dma(v.nominalHasta) + '">Copiar fecha final ' + dma(v.nominalHasta) + '</button></div>' : '') +
+    '</header>' +
+    reglaHTML(t) +
+    '<div class="cargas">' + cargaHTML('rep1') + cargaHTML('rep9') + '</div>' + cola;
+  enlazarHoy();
+  contadores();
+}
+
+function reglaHTML(t) {
+  const cel = t.linea;
+  const ini = cel.findIndex(d => d.enRep1), fin = cel.length - 1 - cel.slice().reverse().findIndex(d => d.enRep1);
+  let prevMes = -1;
+  const celdas = cel.map(d => {
+    const m = Number(d.fecha.slice(5, 7)) - 1;
+    const mes = (m !== prevMes) ? MES[m] : '';
+    prevMes = m;
+    let extra = '';
+    if (d.aviso1) extra += '<span class="bandera a1">Aviso 1 hoy</span>';
+    if (d.aviso2) extra += '<span class="bandera a2">Aviso 2 hoy</span>';
+    let pie = '';
+    if (d.esHoy) pie = '<span class="hoy-etq">Hoy</span>';
+    else if (!d.habil) pie = '<span class="etq-inhabil">' + esc(d.motivo) + '</span>';
+    else if (d.idx > 0) pie = '<span class="cuenta-dia" title="Día hábil ' + d.idx + ' contando desde hoy">' + d.idx + '</span>';
+    return '<div class="dia ' + (d.habil ? '' : 'inhabil ') + (d.esHoy ? 'hoy' : '') + '">' + extra +
+      '<span class="dow">' + DOW[d.dow] + '</span><span class="dnum">' + Number(d.fecha.slice(8)) + '</span><span class="mes">' + mes + '</span>' + pie + '</div>';
+  }).join('');
+  const barra = cel.map((d, i) => '<i class="' + (d.enRep1 ? 'on ' : '') + (i === ini ? 'ini ' : '') + (i === fin ? 'fin' : '') + '"></i>').join('');
+  const v = t.ventana;
+  return '<div class="regla-marco"><div class="regla" role="img" aria-label="Línea de tiempo de días hábiles">' + celdas + '</div>' +
+    '<div class="regla-barra" aria-hidden="true">' + barra + '</div>' +
+    '<div class="regla-leyenda"><span><b>Rep1:</b> vencimientos ' + rangoTxt(v.nominalDesde, v.nominalHasta) + '</span>' +
+    '<span>El número cuenta días hábiles hasta el pago.</span>' +
+    '<span>Un vencimiento en día inhábil se paga y se avisa el siguiente día hábil.</span></div></div>';
+}
+
+function vigenciaHTML(c) {
+  if (!c || !c.cargado) return '<span class="vigencia vacio">Sin cargar</span>';
+  if (c.ok) return '<span class="vigencia ok">' + (c.edad === 0 ? 'De hoy' : 'De hace ' + pl(c.edad, 'día hábil', 'días hábiles') + ', aún vigente') + '</span>';
+  return '<span class="vigencia vencido">Vencido: tiene ' + pl(c.edad, 'día hábil', 'días hábiles') + ' (máximo ' + c.max + ')</span>';
+}
+
+function cargaHTML(tipo) {
+  const e = S.estado, t = e.tanda, v = t.ventana, c = e.cortes[tipo], sub = S.subida[tipo];
+  const esR1 = tipo === 'rep1';
+  const guia = esR1
+    ? '<div class="filtro-reporte">En el reporte, filtra <b>Fecha Vencimiento</b> del <b>' + dma(v.nominalDesde) + '</b> al <b>' + dma(v.nominalHasta) + '</b>.</div>'
+    : '<div class="filtro-reporte">Descárgalo <b>con corte de hoy</b> y con todas las líneas, en pesos y en dólares.</div>';
+  const corte = c && c.cargado
+    ? '<dl class="corte"><dt>Vigencia</dt><dd>' + vigenciaHTML(c) + '</dd><dt>Cargado</dt><dd class="num">' + hora(c.fechaHora) + ' por ' + esc(c.usuario) + '</dd><dt>Filas</dt><dd class="num">' + c.filas + '</dd>' +
+      (c.rango ? '<dt>Rango declarado</dt><dd>' + esc(c.rango) + '</dd>' : '') + (c.archivo ? '<dt>Archivo</dt><dd>' + esc(c.archivo) + '</dd>' : '') + '</dl>'
+    : '<dl class="corte"><dt>Vigencia</dt><dd>' + vigenciaHTML(null) + '</dd></dl>';
+  const deshab = !can('cargar');
+  const zona = '<div class="zona" data-zona="' + tipo + '" tabindex="0" role="button" ' + (deshab ? 'aria-disabled="true"' : '') + '><strong>' +
+    (c && c.cargado ? 'Cargar un ' + (esR1 ? 'Rep1' : 'Rep9') + ' nuevo' : 'Arrastra el ' + (esR1 ? 'Rep1' : 'Rep9') + ' aquí') + '</strong>o haz clic para elegir el archivo (.xlsx o .xls)</div>' +
+    '<input type="file" accept=".xlsx,.xls" hidden data-archivo="' + tipo + '">';
+  return '<div class="carga"><h2>' + (esR1 ? 'Rep1: vencimientos' : 'Rep9: saldos') + '</h2>' +
+    '<p class="que">' + (esR1 ? 'Las cuotas que vencen en la ventana de la tanda.' : 'Saldos, intereses y moratorios de toda la cartera.') + '</p>' +
+    guia + corte + (deshab ? '' : zona) + validacionHTML(tipo, sub) + '</div>';
+}
+
+function notasHTML(avisos) {
+  if (!avisos || !avisos.length) return '';
+  return '<ul class="notas">' + avisos.map(a => '<li><svg><use href="#g-' + (a.nivel === 'warn' ? 'warn' : 'info') + '"/></svg><span>' + esc(a.texto) + '</span></li>').join('') + '</ul>';
+}
+
+function validacionHTML(tipo, sub) {
+  if (!sub) return '';
+  if (sub.estado === 'procesando') return '<div class="validacion"><span class="giro"></span>Leyendo ' + esc(sub.archivo) + '…</div>';
+  if (sub.estado === 'guardando') return '<div class="validacion"><span class="giro"></span>Guardando…</div>';
+  const v = sub.val;
+  if (sub.estado === 'error' || !v || !v.ok) {
+    return '<div class="validacion"><h3>No se pudo usar ' + esc(sub.archivo) + '</h3><ul class="notas"><li><svg><use href="#g-error"/></svg><span>' + esc((v && v.error) || sub.error) + '</span></li>' +
+      ((v && v.mismatches) || []).slice(0, 6).map(m => '<li><svg></svg><span>' + esc(m) + '</span></li>').join('') + '</ul></div>';
+  }
+  const esR1 = tipo === 'rep1';
+  let cuerpo = '<p><b class="num">' + v.filas + '</b> ' + (esR1 ? 'cuotas' : 'líneas') + ' leídas. Control: <span class="num">' + dinero(v.control) + '</span> ' + (esR1 ? 'de importe' : 'de saldo total') + '.</p>';
+  if (esR1) {
+    cuerpo += '<div class="fechas-rep1">' + v.porFecha.map(f => '<span class="' + (f.fecha >= v.requerido.desde && f.fecha <= v.requerido.hasta ? 'dentro' : '') + (f.habil ? '' : ' finde') + '">' + dCorta(f.fecha) + ': ' + f.n + '</span>').join('') + '</div>';
+  }
+  const texto = esR1
+    ? 'Descargué el Rep1 con vencimientos del ' + dma(v.requerido.desde) + ' al ' + dma(v.requerido.hasta) + '.'
+    : 'Este Rep9 tiene corte de hoy.';
+  return '<div class="validacion"><h3>Revisión de ' + esc(sub.archivo) + '</h3>' + cuerpo + notasHTML(v.avisos) +
+    '<label class="confirma"><input type="checkbox" data-confirma="' + tipo + '"' + (sub.confirmado ? ' checked' : '') + '><span>' + esc(texto) + '</span></label>' +
+    '<div class="acciones" style="margin-top:0"><button class="btn principal" data-guardar="' + tipo + '"' + (sub.confirmado ? '' : ' disabled') + '>Guardar ' + (esR1 ? 'Rep1' : 'Rep9') + '</button>' +
+    '<button class="btn texto" data-descartar="' + tipo + '">Descartar</button></div></div>';
+}
+
+function enlazarHoy() {
+  const raiz = $('#v-hoy');
+  $$('[data-copiar]', raiz).forEach(b => b.addEventListener('click', () => copiar(b.dataset.copiar)));
+  $$('[data-zona]', raiz).forEach(z => {
+    const tipo = z.dataset.zona, input = $('[data-archivo="' + tipo + '"]', raiz);
+    z.addEventListener('click', () => input.click());
+    z.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('arrastre'); });
+    z.addEventListener('dragleave', () => z.classList.remove('arrastre'));
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('arrastre'); if (e.dataTransfer.files[0]) recibirArchivo(tipo, e.dataTransfer.files[0]); });
+    input.addEventListener('change', () => { if (input.files[0]) recibirArchivo(tipo, input.files[0]); input.value = ''; });
+  });
+  $$('[data-confirma]', raiz).forEach(c => c.addEventListener('change', () => { S.subida[c.dataset.confirma].confirmado = c.checked; $('[data-guardar="' + c.dataset.confirma + '"]', raiz).disabled = !c.checked; }));
+  $$('[data-guardar]', raiz).forEach(b => b.addEventListener('click', () => guardarSubida(b.dataset.guardar)));
+  $$('[data-descartar]', raiz).forEach(b => b.addEventListener('click', () => { S.subida[b.dataset.descartar] = null; pintarHoy(); }));
+  const ir = $('[data-ir-cola]', raiz); if (ir) ir.addEventListener('click', () => irA('cola'));
 }
 
 function parseXlsx(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = e => {
+    reader.onload = ev => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
-        
-        const cleaned = rows.map(row => row.map(cell => {
-          if (cell instanceof Date) return cell.toISOString();
+        const iso = (y, m, d) => y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0') + 'T12:00:00';
+        resolve(rows.map(row => row.map(cell => {
+          if (cell instanceof Date) { const c = new Date(cell.getTime() + 12 * 3600 * 1000); return iso(c.getFullYear(), c.getMonth() + 1, c.getDate()); }
           if (typeof cell === 'string') {
-            const match = cell.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-            if (match) {
-              // REVERTIMOS: El primer dígito es el MES y el segundo es el DÍA (formato original exitoso)
-              const mes = parseInt(match[1], 10) - 1; 
-              const dia = parseInt(match[2], 10);     
-              let anio = parseInt(match[3], 10);
-              if (anio < 100) anio += 2000;
-              // Guardamos temporalmente al mediodía
-              return new Date(anio, mes, dia, 12, 0, 0).toISOString();
+            const m = cell.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+            if (m) {   // el reporte trae mes/día/año: el primer número es el MES
+              let y = parseInt(m[3], 10); if (y < 100) y += 2000;
+              return iso(y, parseInt(m[1], 10), parseInt(m[2], 10));
             }
           }
           return cell;
-        }));
-        resolve(cleaned);
+        })));
       } catch (err) { reject(err); }
     };
-    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
     reader.readAsArrayBuffer(file);
   });
 }
 
-function showCardStatus(el, type, html) {
-  const cls = type === 'error' ? 'status-error' : 'status-success';
-  el.innerHTML = `<div class="${cls}">${html}</div>`;
+async function recibirArchivo(tipo, file) {
+  if (!/\.(xlsx|xls)$/i.test(file.name)) { S.subida[tipo] = { estado: 'error', archivo: file.name, error: 'Formato no válido. Usa un archivo .xlsx o .xls.' }; pintarHoy(); return; }
+  S.subida[tipo] = { estado: 'procesando', archivo: file.name }; pintarHoy();
+  try {
+    const rows = await parseXlsx(file);
+    const val = await api('validarReporte', tipo, rows, { archivo: file.name });
+    S.subida[tipo] = { estado: val.ok ? 'validado' : 'error', archivo: file.name, rows: rows, val: val, confirmado: false, error: val.error };
+  } catch (err) { S.subida[tipo] = { estado: 'error', archivo: file.name, error: err.message }; }
+  pintarHoy();
 }
 
-// ─── 4. LÓGICA DEL DASHBOARD Y TABLA ───────────────────────────────
-function initDashboard() {
-  document.getElementById('btnRecalcular').addEventListener('click', recalcularAvisos);
-  document.getElementById('btnHojaTrabajo').addEventListener('click', regenerarHojaTrabajo);
-  document.getElementById('toggleModoPrueba').addEventListener('change', toggleModoPrueba);
-
-  // Filtros
-  document.querySelectorAll('#filterPills .filter-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      document.querySelectorAll('#filterPills .filter-pill').forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      state.filterTipo = pill.dataset.filter;
-      renderTable();
-    });
-  });
-
-  document.getElementById('filterSearch').addEventListener('input', e => {
-    state.filterSearch = e.target.value.toLowerCase().trim();
-    renderTable();
-  });
-
-  // Check all & Masivos
-  document.getElementById('checkAll').addEventListener('change', e => {
-    const lineas = getFilteredLineas();
-    if (e.target.checked) lineas.forEach(l => state.selected.add(l));
-    else lineas.forEach(l => state.selected.delete(l));
-    renderTable();
-    updateSelectionBar();
-  });
-
-  document.getElementById('btnSelectClear').addEventListener('click', () => {
-    state.selected.clear();
-    renderTable();
-    updateSelectionBar();
-  });
-  document.getElementById('btnEnviarMasivo').addEventListener('click', abrirConfirmacionMasiva);
+async function guardarSubida(tipo) {
+  const sub = S.subida[tipo]; if (!sub || !sub.confirmado) return;
+  const v = sub.val, meta = { archivo: sub.archivo };
+  if (tipo === 'rep1') { meta.rangoDesde = v.requerido.desde; meta.rangoHasta = v.requerido.hasta; }
+  sub.estado = 'guardando'; pintarHoy();
+  const r = await api('guardarReporte', tipo, sub.rows, meta);
+  if (!r.ok) { S.subida[tipo] = { estado: 'error', archivo: sub.archivo, error: r.error }; pintarHoy(); return; }
+  S.subida[tipo] = null;
+  toast((tipo === 'rep1' ? 'Rep1' : 'Rep9') + ' guardado: ' + r.filas + ' filas.');
+  await refrescarEstado();
+  S.sel.clear();
+  if (S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado) await cargarCola(true); else pintarHoy();
 }
 
-function recalcularAvisos() {
-  const btn = document.getElementById('btnRecalcular');
-  const original = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner spinner-light"></span> Calculando…';
-
-  google.script.run
-    .withSuccessHandler(result => {
-      btn.disabled = false;
-      btn.innerHTML = original;
-      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
-
-      state.avisos = result.avisos;
-      state.stats = result.stats;
-      state.fechaReporte = result.fechaReporte;
-      state.warnings = result.warnings || [];
-      state.selected.clear();
-
-      try {
-        renderFechaCalculo();
-        renderKPIs();
-        renderFilterCounts();
-        renderTable();
-        updateSelectionBar();
-
-        document.getElementById('dashEmpty').hidden = true;
-        document.getElementById('kpiGrid').hidden = false;
-        document.getElementById('dashFilters').hidden = false;
-        document.getElementById('tableWrap').hidden = false;
-
-        toast(`✓ ${result.stats.elegibles} avisos calculados`, 'success');
-      } catch (e) {
-        toast(`Error visualizando tabla: ${e.message}`, 'error');
-        console.error(e);
-      }
-    })
-    .withFailureHandler(err => {
-      btn.disabled = false;
-      btn.innerHTML = original;
-      toast(`Error al calcular: ${err.message}`, 'error');
-    })
-    .calcularAvisos();
+/* ─── Resumen de la cola (en Hoy) ──────────────────────────────────────── */
+function barraEstados(stats) {
+  const total = stats.total || 1;
+  const seg = ORDEN_ESTADOS.filter(k => stats.porEstado[k]).map(k => '<span class="e-' + k + '" style="width:' + (stats.porEstado[k] / total * 100) + '%" title="' + ETIQUETA[k] + ': ' + stats.porEstado[k] + '"></span>').join('');
+  const ley = ORDEN_ESTADOS.filter(k => stats.porEstado[k]).map(k => '<div><i class="sw e-' + k + '"></i>' + ETIQUETA[k] + ' <b>' + stats.porEstado[k] + '</b></div>').join('');
+  return '<div class="apilada" role="img" aria-label="Distribución de la cola por estado">' + seg + '</div><div class="leyenda">' + ley + '</div>';
 }
 
-function regenerarHojaTrabajo() {
-  const btn = document.getElementById('btnHojaTrabajo');
-  const original = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Generando…';
-  google.script.run
-    .withSuccessHandler(result => {
-      btn.disabled = false; btn.innerHTML = original;
-      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
-      toast(`✓ Hoja_Trabajo regenerada`, 'success');
-    })
-    .withFailureHandler(err => {
-      btn.disabled = false; btn.innerHTML = original; toast(`Error: ${err.message}`, 'error');
-    })
-    .regenerarHojaTrabajo();
+function resumenColaHTML() {
+  const c = S.cola, st = c.stats;
+  const frescos = c.frescura.rep1.ok && c.frescura.rep9.ok;
+  const lectura = st.porEnviar
+    ? pl(st.porEnviar, 'aviso por enviar', 'avisos por enviar') + ' hoy: ' + st.aviso1 + ' de aviso 1 y ' + st.aviso2 + ' de aviso 2.' + (st.sumaMXN ? ' ' + dinero(st.sumaMXN) + ' MXN' : '') + (st.sumaUSD ? ' y ' + dinero(st.sumaUSD, 'USD') : '') + ' en total.'
+    : 'Hoy no hay avisos por enviar con los reportes cargados.';
+  const aviso = frescos ? '' : '<p class="lectura" style="color:var(--ladrillo);margin-top:8px"><b>Hay un reporte vencido:</b> las cuotas por enviar quedan bloqueadas hasta cargar uno nuevo.</p>';
+  return '<div class="cola-resumen"><h2>La cola de hoy</h2><p class="lectura">' + esc(lectura) + '</p>' + aviso + barraEstados(st) +
+    '<div class="acciones"><button class="btn principal" data-ir-cola>Revisar la cola</button></div></div>';
 }
 
-function toggleModoPrueba(e) {
-  const activo = e.target.checked;
-  const banner = document.getElementById('modoPruebaBanner');
-  banner.hidden = !activo;
-  google.script.run
-    .withSuccessHandler(result => {
-      if (!result.ok) { e.target.checked = !activo; banner.hidden = activo; return; }
-      toast(activo ? '⚠ Modo prueba ACTIVADO' : '✓ Modo prueba DESACTIVADO', activo ? 'error' : 'success');
-    })
-    .setModoPrueba(activo);
+async function cargarCola(silencioso) {
+  S.cargandoCola = true;
+  const c = await api('getCola');
+  S.cargandoCola = false;
+  S.cola = c;
+  if (!c.ok && !silencioso) toast(c.error, 'error');
+  const llaves = new Set(c.ok ? c.items.map(i => i.key) : []);
+  S.sel.forEach(k => { if (!llaves.has(k)) S.sel.delete(k); });
+  contadores();
+  if (S.vista === 'hoy') pintarHoy();
+  if (S.vista === 'cola') pintarCola();
 }
 
-// ─── 5. PINTADO DE INTERFAZ (RENDER) ───────────────────────────────
-function renderFechaCalculo() {
-  const d = new Date(state.fechaReporte);
-  const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
-  let txt = d.toLocaleDateString('es-MX', opts);
-  document.getElementById('fechaCalculo').textContent = txt.charAt(0).toUpperCase() + txt.slice(1);
+/* ═══════════════════════ COLA ══════════════════════════════════════════════ */
+const FILTROS = [
+  ['enviar', 'Por enviar', i => !!i.accion], ['LISTA', 'Listas', i => i.estado === 'LISTA'],
+  ['REVISAR', 'Por revisar', i => i.estado === 'REVISAR'], ['BLOQUEADA', 'Bloqueadas', i => i.estado === 'BLOQUEADA'],
+  ['proximas', 'Próximas', i => i.estado === 'PROGRAMADA' || i.estado === 'ESPERA_VISPERA'], ['hechas', 'Completas', i => i.estado === 'COMPLETA'],
+  ['fuera', 'Vencen hoy o vencidas', i => i.estado === 'VENCE_HOY' || i.estado === 'VENCIDA'], ['todas', 'Todas', () => true]
+];
+
+function visibles() {
+  const f = FILTROS.find(x => x[0] === S.filtro) || FILTROS[0];
+  const q = S.busqueda.trim().toLowerCase();
+  return S.cola.items.filter(f[2]).filter(i => !q || (i.linea + ' ' + i.cliente).toLowerCase().indexOf(q) >= 0);
 }
 
-function renderKPIs() {
-  const s = state.stats;
-  document.getElementById('kpiTotal').textContent = formatMoney(s.sumaTotalMXN || 0); 
-  document.getElementById('kpiTotalMeta').textContent = `${s.elegibles} avisos en periodo`;
-  document.getElementById('kpiCapVenc').textContent = formatMoney(s.sumaCapVencido);
-  const conCapVenc = state.avisos.filter(a => a.capVencido > 0).length;
-  document.getElementById('kpiCapVencMeta').textContent = `${conCapVenc} cliente(s) con adeudos previos`;
-  document.getElementById('kpiMor').textContent = formatMoney(s.sumaMoratorios);
-  const totalWarn = s.sinRep9 + s.sinTasa + s.sinCorreo;
-  document.getElementById('kpiWarn').textContent = totalWarn;
-  document.getElementById('kpiWarnMeta').textContent = `${s.sinRep9} sin Rep9 · ${s.sinTasa} sin tasa · ${s.sinCorreo} sin correo`;
-}
-
-function renderFilterCounts() {
-  const s = state.stats;
-  const totalWarn = s.sinRep9 + s.sinTasa + s.sinCorreo;
-  const counts = { '>5': 0, '5': 0, '<5': 0 };
-  state.avisos.forEach(a => {
-    if (a.dias > 5) counts['>5']++;
-    else if (a.dias === 5) counts['5']++;
-    else counts['<5']++;
-  });
-
-  document.querySelector('.filter-pill[data-filter="all"]').innerHTML = `Todos <span class="pill-count">${state.avisos.length}</span>`;
-  document.querySelector('.filter-pill[data-filter=">5"]').innerHTML = `> 5 días <span class="pill-count">${counts['>5']}</span>`;
-  document.querySelector('.filter-pill[data-filter="5"]').innerHTML = `5 días <span class="pill-count">${counts['5']}</span>`;
-  document.querySelector('.filter-pill[data-filter="<5"]').innerHTML = `< 5 días <span class="pill-count">${counts['<5']}</span>`;
-  document.querySelector('.filter-pill[data-filter="warn"]').innerHTML = `Solo warnings <span class="pill-count">${totalWarn}</span>`;
-}
-
-function badgeDias(dias) {
-  if (dias > 5) return `<span class="aviso-badge aviso-green">${dias} días</span>`;
-  if (dias === 5) return `<span class="aviso-badge aviso-yellow">5 días</span>`;
-  return `<span class="aviso-badge aviso-red">${dias} días</span>`;
-}
-
-function badgeTipoAviso(tipoAviso) {
-  const cls = tipoAviso === 'VISPERA' || tipoAviso === 'T-1' || tipoAviso === 'T+0'
-    ? 'aviso-red'
-    : 'aviso-yellow';
-  return `<span class="aviso-badge ${cls}">${escapeHtml(tipoAviso || '—')}</span>`;
-}
-
-function isEnviable(a) {
-  return !a.sinRep9 && !!a.cuentaSTP && !!a.correo && !a.sinCorreo;
-}
-
-function getFilteredAvisos() {
-  let filtered = state.avisos;
-  if (state.filterTipo === 'warn') filtered = filtered.filter(a => a.sinRep9 || a.sinTasa || a.sinCorreo);
-  else if (state.filterTipo === '>5') filtered = filtered.filter(a => a.dias > 5);
-  else if (state.filterTipo === '5') filtered = filtered.filter(a => a.dias === 5);
-  else if (state.filterTipo === '<5') filtered = filtered.filter(a => a.dias < 5);
-  
-  if (state.filterSearch) {
-    const q = state.filterSearch.toLowerCase().trim();
-    filtered = filtered.filter(a => String(a.linea).toLowerCase().includes(q) || String(a.nombre).toLowerCase().includes(q));
-  }
-  return filtered;
-}
-
-function getFilteredLineas() { return getFilteredAvisos().map(a => String(a.linea)); }
-
-function renderTable() {
-  const tbody = document.getElementById('dashTbody');
-  const empty = document.getElementById('tableEmpty');
-  const filtered = getFilteredAvisos();
-
-  if (filtered.length === 0) {
-    tbody.innerHTML = '';
-    empty.hidden = false;
-    actualizarCheckAll([]);
+function pintarCola() {
+  const raiz = $('#v-cola');
+  if (!S.cola) {
+    raiz.innerHTML = '<header class="cabecera"><h2>Cola de envío</h2></header><div class="cargando"><span class="giro"></span>Calculando la cola…</div>';
+    if (!S.cargandoCola && S.estado && S.estado.inicializado) cargarCola(true);
     return;
   }
-  empty.hidden = true;
+  if (!S.cola.ok) {
+    raiz.innerHTML = '<header class="cabecera"><h2>Cola de envío</h2></header><div class="tabla-marco"><div class="vacio"><b>Todavía no hay cola</b>' + esc(S.cola.error) + '<div class="acciones" style="justify-content:center"><button class="btn principal" data-ir-hoy>Ir a Hoy y cargar los reportes</button></div></div></div>';
+    $('[data-ir-hoy]', raiz).addEventListener('click', () => irA('hoy'));
+    return;
+  }
+  const c = S.cola, items = visibles();
+  const cuentas = {}; FILTROS.forEach(f => cuentas[f[0]] = c.items.filter(f[2]).length);
+  const pills = FILTROS.filter(f => f[0] === 'todas' || cuentas[f[0]] > 0 || f[0] === S.filtro).map(f => '<button aria-pressed="' + (S.filtro === f[0]) + '" data-filtro="' + f[0] + '">' + f[1] + '<b>' + cuentas[f[0]] + '</b></button>').join('');
+  const r1 = c.frescura.rep1.corte, r9 = c.frescura.rep9.corte;
+  const listasVis = items.filter(i => i.estado === 'LISTA'), todasSel = listasVis.length > 0 && listasVis.every(i => S.sel.has(i.key));
+  raiz.innerHTML =
+    '<header class="cabecera"><p class="fecha">' + dLargaAnio(c.hoy) + '</p><h2>Cola de envío</h2>' +
+    '<p class="sub">Rep1 cargado el ' + hora(r1.fechaHora) + ' y Rep9 el ' + hora(r9.fechaHora) + '. Toca una fila para ver cómo se calculó el monto.</p></header>' +
+    '<div class="herramientas"><div class="filtros">' + pills + '</div><input class="buscar" type="search" placeholder="Buscar por línea o cliente" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div>' +
+    '<div class="tabla-marco"><table><thead><tr><th><input type="checkbox" id="chk-todas" ' + (todasSel ? 'checked ' : '') + (listasVis.length ? '' : 'disabled ') + 'aria-label="Seleccionar las listas visibles"></th><th>Estado</th><th>Cliente</th><th>Pago</th><th class="der">Hábiles</th><th>Aviso</th><th class="der">Total</th><th>Notas</th><th></th></tr></thead><tbody id="cuerpo-cola">' +
+    (items.length ? items.map(filaHTML).join('') : '<tr><td colspan="9"><div class="vacio"><b>Nada en este filtro</b>Cambia de filtro o borra la búsqueda.</div></td></tr>') +
+    '</tbody></table></div><div id="barra-envio-slot"></div>';
+  enlazarCola(items);
+  pintarBarraEnvio();
+}
 
-  tbody.innerHTML = filtered.map(a => {
-    const hasWarn = a.sinRep9 || a.sinTasa || a.sinCorreo || !a.cuentaSTP;
-    const rowClass = hasWarn ? 'row-warn' : '';
-    const fechaTxt = formatFechaCorta(a.fechaVenc);
-    const tipoBadge = badgeDias(a.dias); 
-    const monedaBadge = a.moneda === 'USD' ? '<span class="moneda-badge moneda-usd">USD</span>' : '<span class="moneda-badge moneda-mxn">MXN</span>';
-    const warnIcon = hasWarn ? '<span class="warn-icon">⚠</span>' : '';
-    const enviable = isEnviable(a);
-    const checked = state.selected.has(String(a.linea)) ? 'checked' : '';
-    const checkbox = enviable
-      ? `<input type="checkbox" class="row-check" data-linea="${escapeHtml(a.linea)}" ${checked}>`
-      : `<input type="checkbox" disabled title="No enviable: falta STP, correo o tiene warnings">`;
+function filaHTML(i) {
+  const sel = S.sel.has(i.key), abierta = S.abiertas.has(i.key);
+  const elegible = !!i.accion && i.estado !== 'BLOQUEADA';
+  const aviso = i.accion === 'PREVENTIVO' ? '<span class="chip aviso1">Aviso 1</span>' : i.accion === 'VISPERA' ? '<span class="chip aviso2">Aviso 2</span>'
+    : i.programadaPara ? '<span class="chip">' + (i.estado === 'ESPERA_VISPERA' ? 'Aviso 2 el ' : 'Aviso 1 el ') + dCorta(i.programadaPara) + '</span>' : '';
+  const notas = i.bloqueos.map(b => '<span class="chip bloq" title="' + esc(b.texto) + '">' + esc(textoCorto(b.codigo)) + '</span>')
+    .concat(i.alertas.filter(a => a.nivel === 'warn').map(a => '<span class="chip warn" title="' + esc(a.texto) + '">' + esc(textoCorto(a.codigo)) + '</span>'))
+    .concat(i.alertas.filter(a => a.nivel !== 'warn' && ['CON_AJUSTES', 'MONTO_CAMBIO'].indexOf(a.codigo) >= 0).map(a => '<span class="chip" title="' + esc(a.texto) + '">' + esc(textoCorto(a.codigo)) + '</span>')).join('');
+  let h = '<tr class="fila" data-key="' + esc(i.key) + '"><td><input type="checkbox" data-sel ' + (sel ? 'checked' : '') + (elegible && can('enviar') ? '' : ' disabled') + ' aria-label="Seleccionar"></td>' +
+    '<td><span class="estado"><svg><use href="#g-' + i.estado + '"/></svg>' + ETIQUETA[i.estado] + '</span></td>' +
+    '<td class="cliente"><b title="' + esc(i.cliente) + '">' + esc(i.cliente) + '</b><small>Línea ' + esc(i.linea) + (i.multiCuota ? ' · varias cuotas' : '') + '</small></td>' +
+    '<td class="pago num">' + dCorta(i.fechaPago) + (i.fechaPago !== i.fechaNominal ? '<small>vence ' + dCorta(i.fechaNominal) + '</small>' : '') + '</td>' +
+    '<td class="der num">' + i.diasHabiles + '</td><td>' + aviso + '</td>' +
+    '<td class="der monto num">' + dinero(i.total, i.moneda) + '<small>' + i.moneda + '</small></td><td>' + notas + '</td>' +
+    '<td style="white-space:nowrap"><button class="btn chico" data-ver>Correo</button></td></tr>';
+  if (abierta) h += detalleHTML(i);
+  return h;
+}
 
-    let acciones = `
-      <button class="action-btn" data-act="detalle" data-linea="${escapeHtml(a.linea)}">Detalle</button>
-      <button class="action-btn" data-act="correo" data-linea="${escapeHtml(a.linea)}">Vista correo</button>`;
-    
-    if (hasWarn) {
-      const motivos = [];
-      if (a.sinRep9) motivos.push('Sin Rep9');
-      if (!a.cuentaSTP) motivos.push('Sin STP');
-      if (a.sinCorreo) motivos.push('Sin correo');
-      acciones += `<div style="margin-top:4px;"><span class="tag-warn">${motivos.join(', ')}</span></div>`;
+function textoCorto(c) {
+  return ({ SIN_CORREO: 'Sin correo', SIN_STP: 'Sin cuenta STP', REP1_VENCIDO: 'Rep1 vencido', REP9_VENCIDO: 'Rep9 vencido', MONEDA_DISTINTA: 'Moneda distinta',
+    AJUSTE_PENDIENTE: 'Ajuste por aprobar', SIN_REP9: 'Sin Rep9', SIN_TASA: 'Sin tasa', TASA_DUPLICADA: 'Tasa repetida', CONTACTO_DUPLICADO: 'Correo repetido',
+    IMPORTE_NO_CUADRA: 'Importe no cuadra', CON_AJUSTES: 'Con ajustes', MONTO_CAMBIO: 'Monto cambió', VENCIDO_EN_PRIMERA: 'Vencido en otra cuota' })[c] || c;
+}
+
+function detalleHTML(i) {
+  const d = i.desglose, m = i.moneda;
+  const fila = (t, v, cls) => v || cls === 'sub' ? '<tr class="' + (cls || '') + '"><td>' + t + '</td><td>' + dinero(v, m) + '</td></tr>' : '';
+  const tasa = i.tasaMoratoria ? (i.tasaMoratoria * 100).toFixed(2).replace(/\.?0+$/, '') + '% anual' : 'sin tasa';
+  const nota = d.moratoriosProy
+    ? 'Moratorios proyectados = capital vencido × tasa moratoria (' + tasa + ', el doble de la del contrato) ÷ 360 × ' + i.diasProy + ' ' + (i.diasProy === 1 ? 'día' : 'días') + ', desde el corte del Rep9 hasta el vencimiento.'
+    : (d.capVencido ? 'Hay capital vencido pero no se proyectan moratorios: ' + (i.sinTasa ? 'falta la tasa en el catálogo.' : 'el vencimiento es el mismo día del corte.') : 'No hay capital vencido, así que no se proyectan moratorios.');
+  const hist = [];
+  if (i.previo) hist.push('Aviso 1 enviado el ' + dCorta(i.previo.fechaKey) + ' por ' + dinero(i.previo.total, m) + '.');
+  if (i.vispera) hist.push('Aviso 2 enviado el ' + dCorta(i.vispera.fechaKey) + '.');
+  if (i.reenvios) hist.push(pl(i.reenvios, 'reenvío', 'reenvíos') + '.');
+  if (i.nota) hist.push(i.nota);
+  const lineas = i.bloqueos.map(b => '<li><svg><use href="#g-error"/></svg><span>' + esc(b.texto) + '</span></li>')
+    .concat(i.alertas.map(a => '<li><svg><use href="#g-' + (a.nivel === 'warn' ? 'warn' : 'info') + '"/></svg><span>' + esc(a.texto) + '</span></li>'))
+    .concat(hist.map(t => '<li><svg><use href="#g-info"/></svg><span>' + esc(t) + '</span></li>')).join('');
+  const aj = i.ajustes.map(a => '<li><svg><use href="#g-info"/></svg><span>Ajuste ' + esc(a.tipo.toLowerCase().replace('_', ' ')) + ' de ' + dinero(a.monto, m) + ': ' + esc(a.motivo) + ' (' + esc(a.usuario) + ').</span></li>').join('');
+  return '<tr class="detalle"><td colspan="9"><div class="detalle-grid"><div><h3>Cómo se calculó</h3><table class="desglose"><tbody>' +
+    fila('Capital', d.capital, 'menor') + fila('Intereses', d.intereses, 'menor') + fila('Otros', d.otros, 'menor') + fila('IVA', d.iva, 'menor') + fila('Cuota del Rep1', d.cuota, 'sub') +
+    fila('Capital vencido', d.capVencido) + fila('Intereses vencidos con IVA', d.intVencidos) + fila('Moratorios acumulados con IVA', d.moratoriosAcum) +
+    fila('Moratorios proyectados', d.moratoriosProy) + fila('Ajustes de saldo', d.ajustes) + fila('Total a pagar', d.total, 'sub') +
+    '</tbody></table><p class="nota-calculo">' + esc(nota) + '</p></div><div><h3>Qué hay que saber</h3>' +
+    (lineas || aj ? '<ul class="notas">' + lineas + aj + '</ul>' : '<p>Sin observaciones.</p>') +
+    '<div class="acciones">' + (can('ajustar') ? '<button class="btn chico" data-ajustar>Ajustar saldo</button>' : '') +
+    (can('enviar') && i.diasHabiles >= 0 && !i.bloqueos.length ? '<button class="btn chico" data-reenviar>Reenviar aviso</button>' : '') +
+    (can('enviar') && i.accion && i.estado !== 'BLOQUEADA' ? '<button class="btn chico principal" data-enviar-uno>Enviar ahora</button>' : '') + '</div></div></div></td></tr>';
+}
+
+function enlazarCola() {
+  const raiz = $('#v-cola');
+  $$('[data-filtro]', raiz).forEach(b => b.addEventListener('click', () => { S.filtro = b.dataset.filtro; pintarCola(); }));
+  const buscar = $('.buscar', raiz);
+  buscar.addEventListener('input', () => {
+    S.busqueda = buscar.value; const pos = buscar.selectionStart;
+    pintarCola(); const nb = $('.buscar', $('#v-cola')); nb.focus(); nb.setSelectionRange(pos, pos);
+  });
+  $('#chk-todas').addEventListener('change', e => {
+    visibles().filter(i => i.estado === 'LISTA').forEach(i => e.target.checked ? S.sel.add(i.key) : S.sel.delete(i.key));
+    pintarCola();
+  });
+  $('#cuerpo-cola').addEventListener('click', e => {
+    const tr = e.target.closest('tr.fila'); if (!tr) { const d = e.target.closest('tr.detalle'); if (d) accionDetalle(e, d.previousElementSibling.dataset.key); return; }
+    const key = tr.dataset.key;
+    if (e.target.matches('[data-sel]')) { e.target.checked ? S.sel.add(key) : S.sel.delete(key); pintarBarraEnvio(); return; }
+    if (e.target.closest('[data-ver]')) { abrirVistaPrevia(key); return; }
+    S.abiertas.has(key) ? S.abiertas.delete(key) : S.abiertas.add(key); pintarCola();
+  });
+}
+
+function accionDetalle(e, key) {
+  if (e.target.closest('[data-ajustar]')) abrirAjuste(key);
+  else if (e.target.closest('[data-reenviar]')) abrirReenvio(key);
+  else if (e.target.closest('[data-enviar-uno]')) confirmarEnvio([key]);
+}
+
+function pintarBarraEnvio() {
+  const slot = $('#barra-envio-slot'); if (!slot) return;
+  const sel = S.cola.items.filter(i => S.sel.has(i.key));
+  if (!sel.length) { slot.innerHTML = ''; return; }
+  const sum = mon => sel.filter(i => i.moneda === mon).reduce((s, i) => s + i.total, 0);
+  const rev = sel.filter(i => i.estado === 'REVISAR').length;
+  slot.innerHTML = '<div class="barra-envio"><span class="resumen">' + pl(sel.length, 'aviso seleccionado', 'avisos seleccionados') +
+    '<small class="num">' + (sum('MXN') ? dinero(sum('MXN')) + ' MXN' : '') + (sum('USD') ? ' ' + dinero(sum('USD'), 'USD') : '') + (rev ? ' · ' + pl(rev, 'con alertas', 'con alertas') : '') + '</small></span>' +
+    '<button class="btn texto" style="color:#fff" data-limpiar>Quitar selección</button><button class="btn principal" data-enviar-sel>Enviar ' + sel.length + '</button></div>';
+  $('[data-limpiar]', slot).addEventListener('click', () => { S.sel.clear(); pintarCola(); });
+  $('[data-enviar-sel]', slot).addEventListener('click', () => confirmarEnvio(sel.map(i => i.key)));
+}
+
+/* ─── Vista previa, envío y reenvío ────────────────────────────────────── */
+async function abrirVistaPrevia(key) {
+  const velo = abrirModal({ titulo: 'Vista previa del correo', ancho: true, cuerpo: '<div class="cargando"><span class="giro"></span>Armando el correo…</div>', pie: '<button class="btn" data-cerrar>Cerrar</button>' });
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+  const p = await api('previsualizarAviso', key);
+  if (!p.ok) { $('.modal-cuerpo', velo).innerHTML = '<p>' + esc(p.error) + '</p>'; return; }
+  const it = p.item, puedeEnviar = can('enviar') && it.accion && it.estado !== 'BLOQUEADA';
+  $('.modal-cuerpo', velo).innerHTML = '<dl class="meta-correo"><dt>Asunto</dt><dd>' + esc(p.asunto) + '</dd><dt>Para</dt><dd>' + esc(p.para.join(', ') || '—') + '</dd>' +
+    (p.cc ? '<dt>Con copia</dt><dd>' + esc(p.cc) + '</dd>' : '') + '<dt>Responder a</dt><dd>' + esc(p.responderA) + '</dd>' +
+    (p.pruebaDestino ? '<dt>Modo prueba</dt><dd>Llegará a ' + esc(p.pruebaDestino) + ', no al cliente.</dd>' : '') + '</dl><iframe class="marco-correo" sandbox title="Correo"></iframe>';
+  $('.marco-correo', velo).srcdoc = p.html;
+  $('.modal-pie', velo).innerHTML = '<button class="btn" data-cerrar>Cerrar</button>' + (puedeEnviar ? '<button class="btn principal" data-enviar>Enviar este aviso</button>' : '');
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+  const be = $('[data-enviar]', velo); if (be) be.addEventListener('click', () => confirmarEnvio([key]));
+}
+
+function confirmarEnvio(keys) {
+  const items = keys.map(k => S.cola.items.find(i => i.key === k)).filter(Boolean);
+  const rev = items.filter(i => i.estado === 'REVISAR');
+  const a1 = items.filter(i => i.accion === 'PREVENTIVO').length, a2 = items.filter(i => i.accion === 'VISPERA').length;
+  const sum = mon => items.filter(i => i.moneda === mon).reduce((s, i) => s + i.total, 0);
+  const prueba = S.estado.modoPrueba;
+  const velo = abrirModal({
+    titulo: 'Enviar ' + pl(items.length, 'aviso', 'avisos'),
+    cuerpo: '<p>' + (a1 ? pl(a1, 'aviso 1', 'avisos 1') : '') + (a1 && a2 ? ' y ' : '') + (a2 ? pl(a2, 'aviso 2', 'avisos 2') : '') + ' por <b class="num">' + (sum('MXN') ? dinero(sum('MXN')) + ' MXN' : '') + (sum('USD') ? ' ' + dinero(sum('USD'), 'USD') : '') + '</b>.</p>' +
+      (prueba ? '<p style="margin-top:8px"><b>Modo prueba:</b> los correos llegan a un buzón interno, no a los clientes.</p>' : '<p style="margin-top:8px">Los correos saldrán a los clientes y a la copia fija configurada.</p>') +
+      '<ul class="lista-res">' + items.slice(0, 6).map(i => '<li>' + esc(i.cliente) + ' <span class="num">' + dinero(i.total, i.moneda) + '</span>' + (i.estado === 'REVISAR' ? ' <span class="chip warn">con alertas</span>' : '') + '</li>').join('') + (items.length > 6 ? '<li>y ' + (items.length - 6) + ' más…</li>' : '') + '</ul>' +
+      (rev.length ? '<label class="confirma"><input type="checkbox" id="ok-revision"><span>Revisé las alertas de ' + pl(rev.length, 'cuota', 'cuotas') + ' y quiero enviarlas.</span></label>' : ''),
+    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal" data-ir' + (rev.length ? ' disabled' : '') + '>Enviar ' + items.length + '</button>'
+  });
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+  const ir = $('[data-ir]', velo);
+  const chk = $('#ok-revision', velo); if (chk) chk.addEventListener('change', () => { ir.disabled = !chk.checked; });
+  ir.addEventListener('click', () => enviarLote(keys, !!chk && chk.checked));
+}
+
+async function enviarLote(keys, confirmarRevision) {
+  const TAM = 12, total = keys.length;
+  const velo = abrirModal({ titulo: 'Enviando avisos', fijo: true, cuerpo: '<p id="env-txt">Preparando…</p><div class="progreso"><i id="env-barra" style="width:0%"></i></div>', pie: '' });
+  const acum = { enviados: 0, errores: 0, omitidos: 0, resultados: [], pendientes: [] };
+  let hechos = 0, fallo = '';
+  for (let i = 0; i < keys.length; i += TAM) {
+    const bloque = keys.slice(i, i + TAM);
+    $('#env-txt', velo).textContent = 'Enviando ' + Math.min(i + TAM, total) + ' de ' + total + '…';
+    const r = await api('enviarAvisos', bloque, { confirmarRevision: confirmarRevision });
+    if (!r.ok) { fallo = r.error; acum.pendientes = acum.pendientes.concat(keys.slice(i)); break; }
+    acum.enviados += r.enviados; acum.errores += r.errores; acum.omitidos += r.omitidos;
+    acum.resultados = acum.resultados.concat(r.resultados); acum.pendientes = acum.pendientes.concat(r.pendientes || []);
+    if (r.pendientes && r.pendientes.length) { acum.pendientes = acum.pendientes.concat(keys.slice(i + TAM)); break; }
+    hechos = Math.min(i + TAM, total);
+    $('#env-barra', velo).style.width = (hechos / total * 100) + '%';
+  }
+  S.sel.clear();
+  if (S.estado.chatConfigurado && acum.enviados + acum.errores > 0) {
+    const bloq = S.cola.items.filter(i => i.estado === 'BLOQUEADA' || i.estado === 'REVISAR').length;
+    api('resumenEnChat', acum, bloq);
+  }
+  await cargarCola(true);
+  mostrarResultadoEnvio(acum, fallo);
+}
+
+function mostrarResultadoEnvio(r, fallo) {
+  const problemas = r.resultados.filter(x => !x.ok);
+  const velo = abrirModal({
+    titulo: 'Resultado del envío',
+    cuerpo: '<div class="conteos"><div><b class="num">' + r.enviados + '</b><span>enviados</span></div>' + (r.errores ? '<div><b class="num" style="color:var(--ladrillo)">' + r.errores + '</b><span>con error</span></div>' : '') +
+      (r.omitidos ? '<div><b class="num">' + r.omitidos + '</b><span>omitidos</span></div>' : '') + (r.pendientes.length ? '<div><b class="num">' + r.pendientes.length + '</b><span>sin enviar</span></div>' : '') + '</div>' +
+      (fallo ? '<p style="margin-top:12px;color:var(--ladrillo)">' + esc(fallo) + '</p>' : '') +
+      (r.pendientes.length && !fallo ? '<p style="margin-top:12px">Se agotó el tiempo o la cuota diaria de Google. Vuelve a enviar: lo ya enviado no se repite.</p>' : '') +
+      (problemas.length ? '<ul class="lista-res">' + problemas.map(x => '<li><b>' + esc(x.cliente || x.key) + ':</b> ' + esc(x.error) + '</li>').join('') + '</ul>' : ''),
+    pie: '<button class="btn principal" data-cerrar>Listo</button>'
+  });
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+}
+
+function abrirReenvio(key) {
+  const i = S.cola.items.find(x => x.key === key);
+  const velo = abrirModal({
+    titulo: 'Reenviar aviso',
+    cuerpo: '<p>Se vuelve a enviar el aviso de <b>' + esc(i.cliente) + '</b> con el monto de hoy (' + dinero(i.total, i.moneda) + '). No cambia el calendario de avisos.</p>' +
+      '<div class="campo" style="margin-top:14px"><label for="motivo-re">Motivo del reenvío</label><textarea id="motivo-re" placeholder="Por ejemplo: el cliente pidió el correo otra vez o cambió su correo."></textarea></div>',
+    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal" data-ir>Reenviar</button>'
+  });
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+  $('[data-ir]', velo).addEventListener('click', async () => {
+    const motivo = $('#motivo-re', velo).value.trim();
+    if (motivo.length < 5) { toast('Escribe el motivo del reenvío (mínimo 5 caracteres).', 'error'); return; }
+    $('[data-ir]', velo).disabled = true;
+    const r = await api('reenviarAviso', key, motivo);
+    cerrarModal();
+    if (r.ok && r.enviados === 1) toast('Aviso reenviado.');
+    else toast((r.resultados && r.resultados[0] && r.resultados[0].error) || r.error || 'No se pudo reenviar.', 'error');
+    cargarCola(true);
+  });
+}
+
+/* ═══════════════════════ BITÁCORA ══════════════════════════════════════════ */
+async function cargarBitacora() {
+  const raiz = $('#v-bitacora');
+  raiz.innerHTML = '<header class="cabecera"><h2>Bitácora de envíos</h2></header><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  S.bitacora = await api('getBitacora', { limite: 600 });
+  pintarBitacora();
+}
+
+function chipStatus(s) {
+  const m = { ENVIADO: ['', 'Enviado'], ENVIADO_PRUEBA: ['warn', 'Prueba'], ERROR: ['bloq', 'Error'], OMITIDO: ['', 'Omitido'] }[s] || ['', s];
+  return '<span class="chip ' + m[0] + '">' + m[1] + '</span>';
+}
+
+function pintarBitacora() {
+  const raiz = $('#v-bitacora'), b = S.bitacora;
+  if (!b || !b.ok) { raiz.innerHTML = '<header class="cabecera"><h2>Bitácora de envíos</h2></header><div class="vacio"><b>No se pudo leer la bitácora</b>' + esc(b && b.error) + '</div>'; return; }
+  const f = S.filtroBit;
+  let regs = b.registros;
+  if (f.status) regs = regs.filter(r => r.status === f.status);
+  if (f.texto) { const q = f.texto.toLowerCase(); regs = regs.filter(r => (r.linea + ' ' + r.cliente + ' ' + r.correos).toLowerCase().indexOf(q) >= 0); }
+  const sts = ['', 'ENVIADO', 'ENVIADO_PRUEBA', 'ERROR', 'OMITIDO'];
+  raiz.innerHTML = '<header class="cabecera"><h2>Bitácora de envíos</h2><p class="sub">Cada intento queda registrado con el corte de los reportes que se usó. Se muestran los últimos ' + b.registros.length + ' movimientos.</p></header>' +
+    '<div class="herramientas"><div class="filtros">' + sts.map(s => '<button aria-pressed="' + (f.status === s) + '" data-st="' + s + '">' + (s ? ({ ENVIADO: 'Enviados', ENVIADO_PRUEBA: 'Pruebas', ERROR: 'Con error', OMITIDO: 'Omitidos' })[s] : 'Todos') + '</button>').join('') + '</div>' +
+    '<input class="buscar" type="search" placeholder="Buscar por línea, cliente o correo" value="' + esc(f.texto) + '"></div>' +
+    '<div class="tabla-marco"><table><thead><tr><th>Cuándo</th><th>Cliente</th><th>Aviso</th><th>Pago</th><th class="der">Total</th><th>Estado</th><th>Quién</th><th>Detalle</th><th></th></tr></thead><tbody>' +
+    (regs.length ? regs.map(r => '<tr><td class="num">' + hora(r.timestamp) + '</td><td class="cliente"><b title="' + esc(r.cliente) + '">' + esc(r.cliente) + '</b><small>Línea ' + esc(r.linea) + '</small></td>' +
+      '<td style="white-space:nowrap">' + esc(({ PREVENTIVO: 'Aviso 1', VISPERA: 'Aviso 2', REENVIO: 'Reenvío', 'T-5': 'Aviso 1', 'T-1': 'Aviso 2', 'T+0': 'Aviso 2' })[r.tipo] || r.tipo) + '</td>' +
+      '<td class="num">' + (r.pagoEfectivo ? dCorta(r.pagoEfectivo) : (r.fechaVenc ? dCorta(r.fechaVenc) : '')) + '</td><td class="der monto num">' + dinero(r.total, r.moneda) + '</td><td>' + chipStatus(r.status) + '</td>' +
+      '<td>' + esc(r.usuario) + '<small style="display:block;color:var(--gris-500)">' + esc(r.origen) + '</small></td><td style="max-width:280px">' + esc(r.mensaje) + '</td>' +
+      '<td>' + (r.status === 'ENVIADO' && can('enviar') ? '<button class="btn chico" data-reenv="' + esc(r.linea + '|' + r.fechaVenc) + '">Reenviar</button>' : '') + '</td></tr>').join('')
+      : '<tr><td colspan="9"><div class="vacio"><b>Sin movimientos</b>Aquí aparecerán los envíos.</div></td></tr>') + '</tbody></table></div>';
+  $$('[data-st]', raiz).forEach(x => x.addEventListener('click', () => { S.filtroBit.status = x.dataset.st; pintarBitacora(); }));
+  const buscar = $('.buscar', raiz);
+  buscar.addEventListener('input', () => { S.filtroBit.texto = buscar.value; const pos = buscar.selectionStart; pintarBitacora(); const nb = $('.buscar', $('#v-bitacora')); nb.focus(); nb.setSelectionRange(pos, pos); });
+  $$('[data-reenv]', raiz).forEach(x => x.addEventListener('click', async () => {
+    if (!S.cola || !S.cola.ok) await cargarCola(true);
+    const item = S.cola && S.cola.ok ? S.cola.items.find(i => i.key === x.dataset.reenv) : null;
+    if (!item) { toast('Esa cuota ya no está en los reportes cargados; sólo se puede reenviar lo que sigue vigente.', 'error'); return; }
+    abrirReenvio(item.key);
+  }));
+}
+
+/* ═══════════════════════ AJUSTES DE SALDO ══════════════════════════════════ */
+async function cargarAjustes() {
+  const raiz = $('#v-ajustes');
+  raiz.innerHTML = '<header class="cabecera"><h2>Ajustes de saldo</h2></header><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  S.ajustes = await api('getAjustes');
+  pintarAjustes(); contadores();
+}
+
+const TIPOS_AJUSTE = { PAGO_APLICADO: 'Pago aplicado', DISPOSICION: 'Disposición de dinero', CORRECCION: 'Corrección manual' };
+
+function pintarAjustes() {
+  const raiz = $('#v-ajustes'), a = S.ajustes;
+  if (!a || !a.ok) { raiz.innerHTML = '<header class="cabecera"><h2>Ajustes de saldo</h2></header><div class="vacio"><b>No se pudo leer</b>' + esc(a && a.error) + '</div>'; return; }
+  const form = can('ajustar') ? '<div class="panel"><h2>Registrar un ajuste</h2><p class="nota">Úsalo cuando un cliente pagó o pidió dinero después de bajar el Rep9. El ajuste cambia el monto del aviso y deja de aplicar cuando cargues un Rep9 nuevo, que ya debe traer el movimiento.' +
+    (a.conAprobacion ? ' Los ajustes de ' + dinero(a.umbral) + ' o más esperan la aprobación de otra persona.' : '') + '</p>' +
+    '<div class="form-grid"><div class="campo"><label for="aj-linea">Línea de crédito</label><input id="aj-linea" inputmode="numeric" placeholder="101306"></div>' +
+    '<div class="campo"><label for="aj-venc">Vencimiento (opcional)</label><input id="aj-venc" type="date"><small>Vacío = la primera cuota de la línea.</small></div>' +
+    '<div class="campo"><label for="aj-tipo">Tipo</label><select id="aj-tipo">' + Object.keys(TIPOS_AJUSTE).map(k => '<option value="' + k + '">' + TIPOS_AJUSTE[k] + '</option>').join('') + '</select></div>' +
+    '<div class="campo"><label for="aj-monto">Monto</label><input id="aj-monto" inputmode="decimal" placeholder="0.00"><small>En una corrección, usa signo negativo para restar.</small></div></div>' +
+    '<div class="campo" style="margin-top:14px"><label for="aj-motivo">Motivo</label><textarea id="aj-motivo" placeholder="Qué pasó y de dónde viene el dato (por ejemplo: pago recibido por SPEI a las 16:50, aún no aplicado)."></textarea></div>' +
+    '<div class="acciones"><button class="btn principal" id="aj-guardar">Registrar ajuste</button></div></div>' : '';
+  raiz.innerHTML = '<header class="cabecera"><h2>Ajustes de saldo</h2><p class="sub">Corte de Rep9 vigente: ' + esc(a.corteRep9 || 'ninguno') + '.</p></header>' + form +
+    '<div class="tabla-marco"><table><thead><tr><th>Cuándo</th><th>Línea</th><th>Tipo</th><th class="der">Monto</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>' +
+    (a.ajustes.length ? a.ajustes.map(x => '<tr><td class="num">' + esc(x.fecha) + '<small style="display:block;color:var(--gris-500)">' + esc(x.usuario) + '</small></td><td class="num">' + esc(x.linea) + (x.vencimiento ? '<small style="display:block;color:var(--gris-500)">cuota ' + dCorta(x.vencimiento) + '</small>' : '') + '</td>' +
+      '<td>' + esc(TIPOS_AJUSTE[x.tipo] || x.tipo) + '</td><td class="der monto num">' + dinero(x.monto) + '</td><td style="max-width:300px">' + esc(x.motivo) + (x.nota ? '<small style="display:block;color:var(--gris-500)">' + esc(x.nota) + '</small>' : '') + '</td>' +
+      '<td>' + (x.estado === 'PENDIENTE' ? '<span class="chip warn">Espera aprobación</span>' : x.estado === 'ANULADO' ? '<span class="chip">Anulado</span>' : x.vigente ? '<span class="chip aviso1">Aplicando</span>' : '<span class="chip">Caducó con el Rep9 nuevo</span>') + '</td>' +
+      '<td style="white-space:nowrap">' + (x.estado === 'PENDIENTE' && can('aprobar') && x.usuario.toLowerCase() !== a.yo ? '<button class="btn chico principal" data-aprobar="' + esc(x.id) + '">Aprobar</button> ' : '') +
+      ((x.estado === 'ACTIVO' || x.estado === 'PENDIENTE') && can('ajustar') ? '<button class="btn chico" data-anular="' + esc(x.id) + '">Anular</button>' : '') + '</td></tr>').join('')
+      : '<tr><td colspan="7"><div class="vacio"><b>Sin ajustes</b>Los ajustes que registres aparecerán aquí.</div></td></tr>') + '</tbody></table></div>';
+  const g = $('#aj-guardar', raiz);
+  if (g) g.addEventListener('click', async () => {
+    g.disabled = true;
+    const r = await api('crearAjuste', { linea: $('#aj-linea').value, vencimiento: $('#aj-venc').value, tipo: $('#aj-tipo').value, monto: $('#aj-monto').value, motivo: $('#aj-motivo').value });
+    g.disabled = false;
+    if (!r.ok) { toast(r.error, 'error'); return; }
+    toast(r.estado === 'PENDIENTE' ? 'Ajuste registrado. Espera la aprobación de otra persona.' : 'Ajuste registrado y aplicado a la cola.');
+    await cargarAjustes(); cargarCola(true);
+  });
+  $$('[data-aprobar]', raiz).forEach(b => b.addEventListener('click', async () => { const r = await api('aprobarAjuste', b.dataset.aprobar); if (!r.ok) toast(r.error, 'error'); else { toast('Ajuste aprobado.'); await cargarAjustes(); cargarCola(true); } }));
+  $$('[data-anular]', raiz).forEach(b => b.addEventListener('click', () => {
+    const velo = abrirModal({ titulo: 'Anular ajuste', cuerpo: '<div class="campo"><label for="mot-an">Motivo</label><textarea id="mot-an"></textarea></div>', pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn peligro" data-ir>Anular ajuste</button>' });
+    $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+    $('[data-ir]', velo).addEventListener('click', async () => { const r = await api('anularAjuste', b.dataset.anular, $('#mot-an', velo).value); if (!r.ok) { toast(r.error, 'error'); return; } cerrarModal(); toast('Ajuste anulado.'); await cargarAjustes(); cargarCola(true); });
+  }));
+}
+
+function abrirAjuste(key) {
+  const i = S.cola.items.find(x => x.key === key);
+  irA('ajustes');
+  const espera = setInterval(() => {
+    if ($('#aj-linea')) { clearInterval(espera); $('#aj-linea').value = i.linea; $('#aj-venc').value = i.fechaNominal; $('#aj-monto').focus(); }
+  }, 80);
+  setTimeout(() => clearInterval(espera), 4000);
+}
+
+/* ═══════════════════════ CATÁLOGOS ═════════════════════════════════════════ */
+async function cargarCatalogos() {
+  const raiz = $('#v-catalogos');
+  raiz.innerHTML = '<header class="cabecera"><h2>Catálogos</h2></header><div class="cargando"><span class="giro"></span>Revisando la cartera…</div>';
+  S.catalogos = await api('getCatalogos');
+  pintarCatalogos(); contadores();
+}
+
+const CAT_LISTAS = [['sinTasa', 'Sin tasa'], ['sinCorreo', 'Sin correo'], ['sinStp', 'Sin cuenta STP'], ['correoInvalido', 'Correo inválido'], ['tasasDuplicadas', 'Tasas repetidas'], ['contactosDuplicados', 'Correos repetidos']];
+
+function pintarCatalogos() {
+  const raiz = $('#v-catalogos'), c = S.catalogos;
+  if (!c || !c.ok) { raiz.innerHTML = '<header class="cabecera"><h2>Catálogos</h2></header><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div>'; return; }
+  const a = c.auditoria;
+  if (!a.cartera) { raiz.innerHTML = '<header class="cabecera"><h2>Catálogos</h2></header><div class="vacio"><b>Carga un Rep9 primero</b>La revisión compara los catálogos contra la cartera del Rep9.</div>'; return; }
+  const lista = a[S.catLista] || [];
+  raiz.innerHTML = '<header class="cabecera"><h2>Catálogos</h2><p class="sub">Qué le falta a la cartera del Rep9 para que sus avisos y sus moratorios salgan completos.</p></header>' +
+    '<div class="panel"><div class="conteos">' + CAT_LISTAS.map(l => '<div><b class="num"' + (a[l[0]].length && ['sinCorreo', 'sinStp', 'correoInvalido'].indexOf(l[0]) >= 0 ? ' style="color:var(--ladrillo)"' : '') + '>' + a[l[0]].length + '</b><span>' + l[1].toLowerCase() + '</span></div>').join('') + '</div></div>' +
+    '<div class="filtros">' + CAT_LISTAS.map(l => '<button aria-pressed="' + (S.catLista === l[0]) + '" data-cl="' + l[0] + '">' + l[1] + '<b>' + a[l[0]].length + '</b></button>').join('') + '</div>' +
+    '<div class="panel">' + (lista.length ? '<ul class="ficha-lista">' + lista.slice(0, 120).map(x => '<li><div class="grow"><b>' + esc(x.cliente || ('Línea ' + x.linea)) + '</b><small>Línea ' + esc(x.linea) + (x.correo ? ' · ' + esc(x.correo) : '') + (x.saldo ? ' · saldo ' + dinero(x.saldo, x.moneda) : '') + '</small></div>' +
+      (can('catalogo') ? '<button class="btn chico" data-ficha="' + esc(x.linea) + '">Completar</button>' : '') + '</li>').join('') + '</ul>' + (lista.length > 120 ? '<p class="nota" style="margin-top:10px">Se muestran las primeras 120.</p>' : '') : '<div class="vacio"><b>Todo en orden</b>No hay pendientes en esta lista.</div>') + '</div>';
+  $$('[data-cl]', raiz).forEach(b => b.addEventListener('click', () => { S.catLista = b.dataset.cl; pintarCatalogos(); }));
+  $$('[data-ficha]', raiz).forEach(b => b.addEventListener('click', () => abrirFicha(b.dataset.ficha)));
+}
+
+async function abrirFicha(linea) {
+  const f = await api('getFichaLinea', linea);
+  if (!f.ok) { toast(f.error, 'error'); return; }
+  const velo = abrirModal({
+    titulo: 'Línea ' + f.linea, ancho: true,
+    cuerpo: '<p style="margin-bottom:14px"><b>' + esc(f.cliente) + '</b></p><div class="form-grid">' +
+      (can('tasas') ? '<div class="campo"><label for="f-tasa">Tasa anual del contrato (%)</label><input id="f-tasa" inputmode="decimal" value="' + (f.tasa ? (f.tasa * 100).toFixed(2).replace(/\.?0+$/, '') : '') + '" placeholder="36"><small>La tasa moratoria es el doble de esta.</small></div>' : '') +
+      '</div><div class="form-grid" style="margin-top:14px"><div class="campo" style="grid-column:1/-1"><label for="f-correos">Correos del cliente</label><input id="f-correos" value="' + esc(f.correo) + '" placeholder="uno@empresa.com, dos@empresa.com"><small>Separados por coma.</small></div>' +
+      '<div class="campo"><label for="f-stp">Cuenta STP (CLABE de 18 dígitos)</label><input id="f-stp" inputmode="numeric" value="' + esc(f.stp) + '"></div></div>',
+    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal" data-ir>Guardar</button>'
+  });
+  $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
+  $('[data-ir]', velo).addEventListener('click', async () => {
+    const ir = $('[data-ir]', velo); ir.disabled = true;
+    if (can('tasas') && $('#f-tasa').value.trim()) {
+      const r = await api('guardarTasa', f.linea, f.cliente, $('#f-tasa').value);
+      if (!r.ok) { toast(r.error, 'error'); ir.disabled = false; return; }
     }
-
-return `
-      <tr class="${rowClass}" data-linea="${escapeHtml(a.linea)}">
-        <td class="col-check">${checkbox}</td>
-        <td>${tipoBadge}</td>
-        <td>${fechaTxt}</td>
-        <td>${escapeHtml(a.linea)}</td>
-        <td class="cell-name">${warnIcon}${escapeHtml(truncate(a.nombre, 24))}</td>
-        
-        <td class="amount ${a.capital === 0 ? 'cell-zero' : ''}">${formatNumber(a.capital)}</td>
-        <td class="amount ${a.capVencido === 0 ? 'cell-zero' : ''}">${formatNumber(a.capVencido)}</td>
-        <td class="amount ${a.intereses === 0 ? 'cell-zero' : ''}">${formatNumber(a.intereses)}</td>
-        <td class="amount ${a.intVencidos === 0 ? 'cell-zero' : ''}">${formatNumber(a.intVencidos)}</td>
-        <td class="amount ${a.moratoriosAcum === 0 ? 'cell-zero' : ''}">${formatNumber(a.moratoriosAcum)}</td>
-        <td class="amount ${a.moratoriosPeriodo === 0 ? 'cell-zero' : ''}">${formatNumber(a.moratoriosPeriodo)}</td>
-        
-        <td class="amount total">${formatNumber(a.total)}</td>
-        <td>${monedaBadge}</td>
-        <td>${acciones}</td>
-      </tr>`;
-      }).join('');
-
-  tbody.querySelectorAll('.action-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.act === 'detalle') openDetailModal(btn.dataset.linea);
-      else if (btn.dataset.act === 'correo') openEmailModal(btn.dataset.linea);
-    });
-  });
-
-  tbody.querySelectorAll('.row-check').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const linea = String(cb.dataset.linea);
-      if (cb.checked) state.selected.add(linea); else state.selected.delete(linea);
-      updateSelectionBar();
-      actualizarCheckAll(getFilteredLineas());
-    });
-  });
-
-  actualizarCheckAll(getFilteredLineas());
-}
-
-function actualizarCheckAll(lineas) {
-  const cb = document.getElementById('checkAll');
-  const enviables = lineas.filter(l => {
-    const a = state.avisos.find(x => String(x.linea) === l);
-    return a && isEnviable(a);
-  });
-  if (enviables.length === 0) { cb.checked = false; cb.indeterminate = false; return; }
-  const sel = enviables.filter(l => state.selected.has(l)).length;
-  cb.checked = sel === enviables.length;
-  cb.indeterminate = sel > 0 && sel < enviables.length;
-}
-
-function updateSelectionBar() {
-  const bar = document.getElementById('selectionBar');
-  const count = state.selected.size;
-  if (count === 0) { bar.hidden = true; return; }
-  bar.hidden = false;
-  const sumaTotal = Array.from(state.selected).reduce((s, linea) => {
-    const a = state.avisos.find(x => String(x.linea) === linea);
-    return s + (a ? a.total : 0);
-  }, 0);
-  document.getElementById('selectionCount').textContent = count;
-  document.getElementById('selectionAmount').textContent = formatMoney(sumaTotal);
-}
-
-// ─── 6. MODALES ────────────────────────────────────────────────────
-function initModals() {
-  const setupModal = (id, closeIds) => {
-    const modal = document.getElementById(id);
-    closeIds.forEach(cId => document.getElementById(cId).addEventListener('click', () => modal.hidden = true));
-    modal.addEventListener('click', e => { if (e.target.id === id) modal.hidden = true; });
-  };
-  setupModal('previewModal', ['modalClose', 'btnCancel']);
-  setupModal('detailModal', ['detailClose', 'detailCloseBtn']);
-  setupModal('emailModal', ['emailClose', 'emailCloseBtn']);
-  setupModal('confirmModal', ['confirmClose', 'confirmCancelBtn']);
-  setupModal('reportModal', ['reportClose', 'reportCloseBtn']);
-  
-  document.getElementById('btnConfirm').addEventListener('click', confirmSave);
-  document.getElementById('btnEnviarIndividual').addEventListener('click', enviarIndividual);
-  document.getElementById('btnConfirmMasivo').addEventListener('click', ejecutarEnvioMasivo);
-}
-
-function openPreviewModal(target, filename) {
-  state.pendingTarget = target;
-  const rows = state[target].rows;
-  const dataRows = rows.slice(1).filter(r => r.some(c => c !== '' && c != null));
-  document.getElementById('previewTitle').textContent = target === 'rep1' ? 'Vista previa · Rep1' : 'Vista previa · Rep9';
-  document.getElementById('previewSummary').innerHTML = `<strong>Archivo:</strong> ${escapeHtml(filename)} · <strong>Registros:</strong> ${dataRows.length}`;
-  
-  const thead = '<thead><tr>' + rows[0].map(h => `<th>${escapeHtml(String(h))}</th>`).join('') + '</tr></thead>';
-  const tbody = '<tbody>' + dataRows.slice(0, 8).map(r => '<tr>' + r.map(c => `<td>${escapeHtml(formatCell(c))}</td>`).join('') + '</tr>').join('') + '</tbody>';
-  document.getElementById('previewTable').innerHTML = thead + tbody;
-  document.getElementById('previewModal').hidden = false;
-}
-
-function confirmSave() {
-  const target = state.pendingTarget;
-  if (!target) return;
-  const btn = document.getElementById('btnConfirm');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Guardando…';
-  const fn = target === 'rep1' ? 'saveRep1ToCache' : 'saveRep9ToCache';
-
-  google.script.run
-    .withSuccessHandler(result => {
-      btn.disabled = false; btn.textContent = 'Guardar al maestro';
-      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
-      document.getElementById('previewModal').hidden = true;
-      toast(`✓ Guardado con éxito`, 'success');
-      renderCacheStatus(target, { loaded: true, rowCount: result.rowsWritten, timestamp: result.timestamp, user: result.user });
-      document.getElementById(`card-${target}`).classList.add('success');
-    })
-    [fn](state[target].rows);
-}
-
-function openDetailModal(linea) {
-  const a = state.avisos.find(x => String(x.linea) === String(linea));
-  if (!a) return;
-  document.getElementById('detailTitle').textContent = `Línea ${a.linea} · ${a.nombre}`;
-  document.getElementById('detailBody').innerHTML = `
-    <div class="detail-section">
-      <h4>Identificación</h4>
-      <div class="detail-grid">
-        <div class="detail-row"><span class="label">Días al Vencimiento</span><span class="value">${badgeDias(a.dias)}</span></div>
-        <div class="detail-row"><span class="label">Fecha</span><span class="value">${formatFechaLarga(a.fechaVenc)}</span></div>
-      </div>
-    </div>
-    <div class="detail-row total-row">
-      <span class="label">TOTAL DEL AVISO</span>
-      <span class="value">${formatMoney(a.total)}</span>
-    </div>`;
-  document.getElementById('detailModal').hidden = false;
-}
-
-function openEmailModal(linea) {
-  state.currentPreviewLinea = String(linea);
-  const modal = document.getElementById('emailModal');
-  const meta = document.getElementById('emailMeta');
-  const frame = document.getElementById('emailPreviewFrame');
-  const btnEnviar = document.getElementById('btnEnviarIndividual');
-
-  meta.innerHTML = `<div class="email-meta-row"><span class="email-meta-label">Cargando…</span></div>`;
-  frame.srcdoc = '<p style="padding:20px; color:#999;">Cargando preview…</p>';
-  btnEnviar.disabled = true;
-  modal.hidden = false;
-
-  google.script.run
-    .withSuccessHandler(result => {
-      if (!result.ok) { meta.innerHTML = `⚠ ${escapeHtml(result.error)}`; frame.srcdoc = ''; return; }
-      let metaHtml = `
-        <div class="email-meta-row"><span>De: </span><span>${escapeHtml(result.from)}</span></div>
-        <div class="email-meta-row"><span>Para: </span><span>${escapeHtml(result.destinatarios.join(', '))}</span></div>
-        <div class="email-meta-row"><span>Asunto: </span><strong>${escapeHtml(result.asunto)}</strong></div>
-      `;
-      meta.innerHTML = metaHtml;
-      frame.srcdoc = result.htmlBody;
-      btnEnviar.disabled = false;
-    })
-    .previsualizarCorreo(linea);
-}
-
-function enviarIndividual() {
-  const linea = state.currentPreviewLinea;
-  if (!linea) return;
-  const btn = document.getElementById('btnEnviarIndividual');
-  const original = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Enviando…';
-
-  google.script.run
-    .withSuccessHandler(result => {
-      btn.disabled = false; btn.innerHTML = original;
-      if (!result.ok) { toast(`Error: ${result.error}`, 'error'); return; }
-      document.getElementById('emailModal').hidden = true;
-      toast(`✓ Aviso enviado`, 'success');
-      recalcularAvisos();
-      refreshBitacora();
-    })
-    .enviarAvisoIndividual(linea, true); 
-}
-
-function abrirConfirmacionMasiva() {
-  const lineas = Array.from(state.selected);
-  if (lineas.length === 0) { toast('No hay avisos seleccionados', 'error'); return; }
-
-  const seleccionados = lineas.map(l => state.avisos.find(a => String(a.linea) === l)).filter(Boolean);
-  const sumaTotal = seleccionados.reduce((s, a) => s + a.total, 0);
-
-  const conteo = { '>5': 0, '5': 0, '<5': 0 };
-  seleccionados.forEach(a => { 
-    if (a.dias > 5) conteo['>5']++; else if (a.dias === 5) conteo['5']++; else conteo['<5']++;
-  });
-
-  document.getElementById('confirmBody').innerHTML = `
-    <div class="confirm-summary">
-      <div class="confirm-stat"><span class="label">Avisos a enviar</span><span class="value">${seleccionados.length}</span></div>
-      <div class="confirm-stat"><span class="label">Distribución</span><span class="value">>5 días: ${conteo['>5']} · 5 días: ${conteo['5']} · <5 días: ${conteo['<5']}</span></div>
-      <div class="confirm-stat total"><span class="label">Total a comunicar</span><span class="value">${formatMoney(sumaTotal)}</span></div>
-    </div>`;
-  document.getElementById('confirmModal').hidden = false;
-}
-
-function ejecutarEnvioMasivo() {
-  const lineas = Array.from(state.selected);
-  const btn = document.getElementById('btnConfirmMasivo');
-  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Enviando ${lineas.length}…`;
-
-  google.script.run
-    .withSuccessHandler(rep => {
-      btn.disabled = false; btn.innerHTML = 'Sí, enviar todos';
-      document.getElementById('confirmModal').hidden = true;
-      document.getElementById('reportBody').innerHTML = `Enviados: ${rep.enviados} | Errores: ${rep.conError}`;
-      document.getElementById('reportModal').hidden = false;
-      state.selected.clear();
-      recalcularAvisos();
-    })
-    .enviarAvisosMasivo(lineas);
-}
-
-// ─── 7. BITÁCORA DE ENVÍOS ─────────────────────────────────────────
-function initBitacora() { document.getElementById('btnRefreshBitacora').addEventListener('click', refreshBitacora); }
-
-function refreshBitacora() {
-  google.script.run
-    .withSuccessHandler(result => {
-      if (!result.ok) return;
-      state.bitacora = result.registros;
-      renderBitacora();
-    })
-    .leerBitacora(50);
-}
-
-function renderBitacora() {
-  const tbody = document.getElementById('bitacoraTbody');
-  const empty = document.getElementById('bitacoraEmpty');
-  document.getElementById('bitacoraCount').textContent = `${state.bitacora.length} registros`;
-  
-  if (state.bitacora.length === 0) { tbody.innerHTML = ''; empty.hidden = false; return; }
-  empty.hidden = true;
-
-  tbody.innerHTML = state.bitacora.map(r => {
-    const tsTxt = new Date(r.timestamp).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-    const statusCls = r.status === 'ENVIADO' ? 'status-enviado' : 'status-error';
-    return `
-      <tr>
-        <td>${tsTxt}</td>
-        <td>${badgeTipoAviso(r.tipoAviso)}</td>
-        <td>${escapeHtml(r.linea)}</td>
-        <td class="cell-name">${escapeHtml(truncate(r.cliente, 30))}</td>
-        <td class="amount total">${formatNumber(r.total)}</td>
-        <td><span class="status-badge ${statusCls}">${r.status}</span></td>
-        <td>
-          <button class="btn btn-secondary btn-sm action-btn btn-vista-correo" data-linea="${escapeHtml(r.linea)}">Vista correo</button>
-        </td>
-      </tr>`;
-  }).join('');
-
-  tbody.querySelectorAll('.btn-vista-correo').forEach(btn => {
-    btn.addEventListener('click', () => openEmailModal(btn.dataset.linea));
+    if ($('#f-correos').value.trim() || $('#f-stp').value.trim()) {
+      const r = await api('guardarContacto', f.linea, f.cliente, $('#f-correos').value, $('#f-stp').value);
+      if (!r.ok) { toast(r.error, 'error'); ir.disabled = false; return; }
+    }
+    cerrarModal(); toast('Catálogo actualizado.');
+    await cargarCatalogos(); cargarCola(true);
   });
 }
 
-// ─── 8. UTILIDADES Y TOAST ─────────────────────────────────────────
-let toastTimer;
-function toast(msg, type = 'success') {
-  const el = document.getElementById('toast');
-  el.className = 'toast ' + type;
-  document.getElementById('toastIcon').textContent = type === 'success' ? '✓' : '✕';
-  document.getElementById('toastMsg').textContent = msg;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
+/* ═══════════════════════ CONFIGURACIÓN ═════════════════════════════════════ */
+async function cargarConfig() {
+  const raiz = $('#v-config');
+  raiz.innerHTML = '<header class="cabecera"><h2>Configuración</h2></header><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  S.config = await api('getConfigUI');
+  pintarConfig();
 }
 
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+function pintarConfig() {
+  const raiz = $('#v-config'), c = S.config;
+  if (!c || !c.ok) { raiz.innerHTML = '<header class="cabecera"><h2>Configuración</h2></header><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div>'; return; }
+  const admin = c.puedeConfig;
+  const ocultos = [];
+  raiz.innerHTML = '<header class="cabecera"><h2>Configuración</h2><p class="sub">' + (admin ? 'Los cambios se guardan al salir de cada campo y quedan en el historial de cambios.' : 'Sólo un administrador puede cambiar estos valores.') + '</p></header>' +
+    '<div class="panel"><h2>Aviso por Chat</h2><p class="nota">Un espacio de Google Chat recibe el recordatorio de descarga, el aviso de reportes faltantes y el resumen de cada envío. Estado: ' + (c.chatConfigurado ? '<span class="chip aviso1">Conectado</span>' : '<span class="chip warn">Sin conectar</span>') + '</p>' +
+    (admin ? '<div class="campo"><label for="cfg-hook">Webhook del espacio</label><input id="cfg-hook" type="password" placeholder="https://chat.googleapis.com/v1/spaces/…" autocomplete="off"><small>Se guarda en las propiedades del script, no en la hoja ni en el código.</small></div>' +
+      '<div class="acciones"><button class="btn principal" id="cfg-guardar-hook">Guardar webhook</button><button class="btn" id="cfg-probar">Enviar mensaje de prueba</button></div>' : '') + '</div>' +
+    '<div class="panel"><h2>Recordatorios automáticos</h2><p class="nota">Activos: ' + (c.triggers.length ? c.triggers.map(t => '<span class="chip">' + esc(t) + '</span>').join('') : '<span class="chip warn">Ninguno instalado</span>') + '</p>' +
+    (admin ? '<div class="acciones"><button class="btn principal" id="cfg-triggers">Instalar o reinstalar recordatorios</button></div>' : '') + '</div>' +
+    '<div class="panel"><h2>Parámetros</h2><div class="tabla-marco" style="border:0"><table class="params"><tbody>' +
+    c.params.filter(p => ocultos.indexOf(p.clave) < 0).map(p => '<tr><td><code>' + esc(p.clave) + '</code></td><td style="width:240px"><input data-clave="' + esc(p.clave) + '" value="' + esc(p.valor) + '"' + (admin && !p.sensible ? '' : ' disabled') + ' aria-label="' + esc(p.clave) + '"></td><td>' + esc(p.descripcion) + '</td></tr>').join('') + '</tbody></table></div></div>' +
+    '<div class="panel"><h2>Días inhábiles</h2><p class="nota">Sábados y domingos nunca cuentan. 2026 coincide con el calendario CNBV publicado; los años siguientes se calculan por regla y conviene validarlos cuando la CNBV publique el suyo.</p>' +
+    '<div class="fechas-rep1">' + c.inhabiles.map(d => '<span class="dentro">' + dCorta(d.fecha) + ' ' + d.fecha.slice(0, 4) + ': ' + esc(d.descripcion) + '</span>').join('') + '</div>' +
+    (admin ? '<div class="form-grid" style="margin-top:14px"><div class="campo"><label for="inh-f">Fecha</label><input id="inh-f" type="date"></div><div class="campo"><label for="inh-d">Descripción</label><input id="inh-d"></div><div class="campo"><label for="inh-e">Acción</label><select id="inh-e"><option value="ACTIVO">Agregar como inhábil</option><option value="QUITAR">Quitar de inhábiles</option></select></div></div><div class="acciones"><button class="btn" id="inh-g">Guardar fecha</button></div>' : '') + '</div>';
+  const q = id => $(id, raiz);
+  if (admin) {
+    q('#cfg-guardar-hook').addEventListener('click', async () => { const r = await api('guardarWebhookChat', q('#cfg-hook').value); if (!r.ok) toast(r.error, 'error'); else { toast(r.configurado ? 'Webhook guardado.' : 'Webhook eliminado.'); S.estado.chatConfigurado = r.configurado; cargarConfig(); } });
+    q('#cfg-probar').addEventListener('click', async () => { const r = await api('probarChat'); toast(r.ok ? 'Mensaje enviado al espacio.' : (r.error || 'No se pudo enviar.'), r.ok ? undefined : 'error'); });
+    q('#cfg-triggers').addEventListener('click', async () => { const r = await api('instalarTriggersUI'); if (!r.ok) toast(r.error, 'error'); else { toast('Recordatorios instalados.'); cargarConfig(); } });
+    $$('[data-clave]', raiz).forEach(inp => inp.addEventListener('change', async () => {
+      const r = await api('setConfig', inp.dataset.clave, inp.value);
+      if (!r.ok) { toast(r.error, 'error'); cargarConfig(); return; }
+      toast(inp.dataset.clave + ' actualizado.'); await refrescarEstado(); if (S.cola) cargarCola(true);
+    }));
+    q('#inh-g').addEventListener('click', async () => { const r = await api('guardarInhabil', q('#inh-f').value, q('#inh-d').value, q('#inh-e').value); if (!r.ok) toast(r.error, 'error'); else { toast('Calendario actualizado.'); await refrescarEstado(); cargarConfig(); } });
+  }
 }
-function truncate(str, max) { return str && str.length > max ? str.substring(0, max - 1) + '…' : str || ''; }
-function formatCell(c) {
-  if (c == null || c === '') return '';
-  if (typeof c === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(c)) return new Date(c).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  if (typeof c === 'number') return c.toLocaleString('es-MX', { maximumFractionDigits: 2 });
-  return String(c);
-}
-function formatNumber(n) { return (n === null || n === undefined || n === '' || n === 0) ? '—' : Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function formatMoney(n) { return (n === null || n === undefined) ? '—' : '$' + (Number(n) || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function formatFechaCorta(iso) { return !iso || isNaN(new Date(iso)) ? '—' : new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }); }
-function formatFechaLarga(iso) {
-  if (!iso || isNaN(new Date(iso))) return '—';
-  let txt = new Date(iso).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  return txt.charAt(0).toUpperCase() + txt.slice(1);
-}
+
+document.addEventListener('DOMContentLoaded', arrancar);
+if (document.readyState !== 'loading') arrancar();
 </script>

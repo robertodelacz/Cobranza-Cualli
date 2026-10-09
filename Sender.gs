@@ -1,340 +1,156 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- *  COBRANZA PREVENTIVA — Envío y Bitácora (Sender.gs)
+ *  COBRANZA PREVENTIVA v2 — Sender.gs
+ *  Envío en lote, reenvío, vista previa y envío automático.
  * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  - El motor se calcula UNA vez por llamada (la v1 lo recalculaba por correo).
+ *  - Un candado impide que dos personas envíen al mismo tiempo.
+ *  - Se respeta el límite de 6 min de Apps Script: si se agota el presupuesto
+ *    de tiempo, lo que falte se devuelve como "pendientes" y se retoma después
+ *    (el estado sale de la bitácora, así que nada se envía dos veces).
+ *  - En MODO_PRUEBA todo llega a un buzón de prueba, se marca ENVIADO_PRUEBA
+ *    y NO consume el aviso real.
  */
 
-// ─── API: PREVIEW (no envía) ───────────────────────────────────────────────
+const PRESUPUESTO_MS = 240000;
 
-/**
- * Devuelve el HTML del correo para mostrar en modal de preview.
- * No envía nada ni registra en bitácora.
- */
-function previsualizarCorreo(linea) {
-  try {
-    const aviso = obtenerAvisoPorLinea_(linea);
-    if (!aviso) {
-      return { ok: false, error: `Línea ${linea} no encontrada en los cálculos actuales.` };
-    }
-
-    const correo = construirCorreoAviso(aviso);
-
-    // Validaciones previas
-    const validacion = validarEnvio_(aviso);
-
-    return {
-      ok: true,
-      asunto: correo.asunto,
-      htmlBody: correo.htmlBody,
-      destinatarios: correo.destinatarios,
-      cc: leerCcFijo_(),
-      from: Session.getActiveUser().getEmail(),
-      validacion: validacion,
-      aviso: aviso
-    };
-  } catch (err) {
-    return { ok: false, error: err.message };
+function destinoReal_(item) {
+  if (cfgBool_('MODO_PRUEBA', false)) {
+    const d = cfgStr_('MODO_PRUEBA_DESTINO', '');
+    const buzon = d || usuarioActual_().email;
+    return { prueba: true, to: [buzon], cc: '', bcc: '' };
   }
+  return { prueba: false, to: item.destinatarios, cc: cfgStr_('CC_FIJO', ''), bcc: cfgStr_('BCC_FIJO', '') };
 }
 
-// ─── API: ENVÍO INDIVIDUAL ─────────────────────────────────────────────────
-
-/**
- * Envía 1 correo y registra en bitácora.
- */
-function enviarAvisoIndividual(linea, forzarReenvio = false) {
-  try {
-    const aviso = obtenerAvisoPorLinea_(linea);
-    if (!aviso) {
-      return { ok: false, error: `Línea ${linea} no encontrada.` };
-    }
-
-    // Le pasamos el parámetro forzarReenvio a la validación
-    const validacion = validarEnvio_(aviso, forzarReenvio);
-    if (!validacion.ok) {
-      return { ok: false, error: validacion.error, validacion: validacion };
-    }
-
-    const resultado = ejecutarEnvio_(aviso);
-    return resultado;
-
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+function asuntoCodificado_(asunto) {
+  if (!cfgBool_('ASUNTO_RFC2047', true)) return asunto;
+  return '=?UTF-8?B?' + Utilities.base64Encode(Utilities.newBlob(asunto).getBytes()) + '?=';
 }
 
-// ─── API: ENVÍO MASIVO ─────────────────────────────────────────────────────
+function replyTo_() {
+  return cfgStr_('REPLY_TO', '') || cfgStr_('NOTIFICAR_A', '') || usuarioActual_().email;
+}
+
+// ─── VISTA PREVIA ──────────────────────────────────────────────────────────
+
+function previsualizar_(key) {
+  const calc = calcularCola_();
+  if (!calc.ok) return calc;
+  const item = calc.items.find(i => i.key === key);
+  if (!item) return { ok: false, error: 'La cuota ya no aparece en los reportes cargados.' };
+  const reg = leerBitacoraMapa_().get(key);
+  const mail = construirCorreo_(item, { montoAnterior: reg && reg.ultimo ? reg.ultimo.total : null, esReenvio: false });
+  const d = destinoReal_(item);
+  return { ok: true, asunto: mail.asunto, html: mail.html, para: item.destinatarios, cc: cfgStr_('CC_FIJO', ''),
+           desde: usuarioActual_().email, responderA: replyTo_(), pruebaDestino: d.prueba ? d.to[0] : '',
+           item: item };
+}
+
+// ─── ENVÍO ─────────────────────────────────────────────────────────────────
 
 /**
- * Envía N correos secuencialmente. Si uno falla, los demás continúan.
- * @param {Array<string>} lineas - lista de líneas a enviar
- * @return {Object} reporte con resumen y detalle por línea
+ * Envía las cuotas indicadas. opts: { origen: 'MANUAL'|'AUTO'|'REENVIO', confirmarRevision, motivo }.
+ * Devuelve { ok, enviados, errores, omitidos, pendientes[], resultados[] }.
  */
-function enviarAvisosMasivo(lineas) {
-  const inicio = new Date();
+function ejecutarEnvios_(keys, opts) {
+  opts = opts || {};
+  const origen = opts.origen || 'MANUAL';
+  const esReenvio = origen === 'REENVIO';
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return { ok: false, error: 'Hay otro envío en curso. Espera a que termine e intenta de nuevo.' };
+
+  const inicio = Date.now();
+  const bitacora = [];
   const resultados = [];
-  let enviados = 0;
-  let conError = 0;
-  let omitidos = 0;
+  const pendientes = [];
+  let enviados = 0, errores = 0, omitidos = 0;
 
-  for (const linea of lineas) {
-    try {
-      const aviso = obtenerAvisoPorLinea_(linea);
-      if (!aviso) {
-        resultados.push({ linea, ok: false, error: 'No encontrada en cálculos' });
+  try {
+    const calc = calcularCola_();
+    if (!calc.ok) return calc;
+    const mapa = new Map(calc.items.map(i => [i.key, i]));
+    const reg = leerBitacoraMapa_();
+    const usuario = usuarioActual_().email;
+    const ahora = new Date();
+    let cuotaDisponible = Infinity;
+    try { cuotaDisponible = MailApp.getRemainingDailyQuota(); } catch (e) {}
+
+    for (let n = 0; n < keys.length; n++) {
+      const key = keys[n];
+      if (Date.now() - inicio > PRESUPUESTO_MS) { pendientes.push.apply(pendientes, keys.slice(n)); break; }
+      const item = mapa.get(key);
+      const omitir = (motivo) => {
         omitidos++;
-        continue;
+        resultados.push({ key: key, ok: false, estado: 'OMITIDO', error: motivo });
+        if (item) bitacora.push(filaBitacora_(item, ahora, usuario, calc, 'OMITIDO', motivo, origen, (item.accion || 'AVISO'), [], ''));
+      };
+      if (!item) { omitidos++; resultados.push({ key: key, ok: false, estado: 'OMITIDO', error: 'La cuota ya no aparece en los reportes.' }); continue; }
+
+      if (esReenvio) {
+        if (item.diasHabiles < 0 || item.estado === 'VENCIDA') { omitir('La cuota ya venció; no se reenvía un aviso preventivo.'); continue; }
+        if (item.bloqueos.length) { omitir(item.bloqueos.map(b => b.texto).join(' ')); continue; }
+      } else {
+        if (!item.accion) { omitir('Hoy no le toca aviso (estado: ' + item.estado + ').'); continue; }
+        if (item.bloqueos.length) { omitir(item.bloqueos.map(b => b.texto).join(' ')); continue; }
+        if (item.estado === 'REVISAR' && !opts.confirmarRevision) { omitir('Tiene alertas por revisar; confírmalas para enviarla.'); continue; }
       }
 
-      const validacion = validarEnvio_(aviso);
-      if (!validacion.ok) {
-        registrarBitacora_(aviso, 'OMITIDO', validacion.error);
-        resultados.push({ linea, ok: false, error: validacion.error });
-        omitidos++;
-        continue;
+      const destino = destinoReal_(item);
+      const necesarios = destino.to.length + (destino.cc ? destino.cc.split(',').length : 0) + (destino.bcc ? destino.bcc.split(',').length : 0);
+      if (cuotaDisponible < necesarios) { pendientes.push.apply(pendientes, keys.slice(n)); resultados.push({ key: key, ok: false, estado: 'PENDIENTE', error: 'Se agotó la cuota diaria de correos de Google.' }); break; }
+
+      const previo = reg.get(key);
+      const mail = construirCorreo_(item, { montoAnterior: previo && previo.ultimo ? previo.ultimo.total : null, esReenvio: esReenvio });
+      const tipo = esReenvio ? 'REENVIO' : item.accion;
+      try {
+        const asunto = (destino.prueba ? '[PRUEBA] ' : '') + mail.asunto;
+        const advanced = { htmlBody: mail.html, name: cfgStr_('REMITENTE_NOMBRE', 'Cobranza Cualli'), replyTo: replyTo_() };
+        if (destino.cc) advanced.cc = destino.cc;
+        if (destino.bcc) advanced.bcc = destino.bcc;
+        MailApp.sendEmail(destino.to.join(','), asuntoCodificado_(asunto), mail.plain, advanced);
+        cuotaDisponible -= necesarios;
+        enviados++;
+        const status = destino.prueba ? 'ENVIADO_PRUEBA' : 'ENVIADO';
+        const msg = (esReenvio ? 'Reenvío: ' + (opts.motivo || '') : 'OK') + (destino.prueba ? ' (modo prueba → ' + destino.to[0] + ')' : '');
+        bitacora.push(filaBitacora_(item, ahora, usuario, calc, status, msg, origen, tipo, destino.to, destino.prueba ? destino.to[0] : item.destinatarios.join(', ')));
+        resultados.push({ key: key, ok: true, estado: status, cliente: item.cliente });
+        Utilities.sleep(150);
+      } catch (err) {
+        errores++;
+        bitacora.push(filaBitacora_(item, ahora, usuario, calc, 'ERROR', String(err.message || err), origen, tipo, destino.to, item.destinatarios.join(', ')));
+        resultados.push({ key: key, ok: false, estado: 'ERROR', error: String(err.message || err), cliente: item.cliente });
       }
-
-      const r = ejecutarEnvio_(aviso);
-      resultados.push({ linea, ok: r.ok, error: r.error || null, cliente: aviso.nombre });
-      if (r.ok) enviados++;
-      else conError++;
-
-      // Throttle suave: 200ms entre envíos para evitar spam-flag
-      Utilities.sleep(200);
-
-    } catch (err) {
-      resultados.push({ linea, ok: false, error: err.message });
-      conError++;
+      if (bitacora.length >= 10) { agregarBitacora_(bitacora.splice(0, bitacora.length)); }
     }
+  } finally {
+    try { if (bitacora.length) agregarBitacora_(bitacora); } finally { lock.releaseLock(); }
   }
-
-  const dur = Math.round((new Date().getTime() - inicio.getTime()) / 1000);
-
-  return {
-    ok: true,
-    total: lineas.length,
-    enviados: enviados,
-    conError: conError,
-    omitidos: omitidos,
-    duracionSeg: dur,
-    resultados: resultados
-  };
+  return { ok: true, enviados: enviados, errores: errores, omitidos: omitidos, pendientes: pendientes, resultados: resultados,
+           duracionSeg: Math.round((Date.now() - inicio) / 1000) };
 }
 
-// ─── EJECUCIÓN INTERNA DEL ENVÍO ───────────────────────────────────────────
-
-/**
- * Ejecuta GmailApp.sendEmail y registra en bitácora.
- * Asume que ya pasó la validación.
- */
-/**
- * Ejecuta MailApp.sendEmail y registra en bitácora.
- * Asume que ya pasó la validación.
- */
-function ejecutarEnvio_(aviso) {
-  const correo = construirCorreoAviso(aviso);
-  const cc = leerCcFijo_();
-  const destinatariosStr = correo.destinatarios.join(',');
-
-  // ─── EL TRUCO MAESTRO: Codificación UTF-8 Base64 (RFC 2047) ───
-  const bytes = Utilities.newBlob(correo.asunto).getBytes();
-  const asuntoSeguro = "=?UTF-8?B?" + Utilities.base64Encode(bytes) + "?=";
-
-  try {
-    // Cambiamos GmailApp por MailApp
-    MailApp.sendEmail(
-      destinatariosStr,
-      asuntoSeguro, 
-      correo.plainBody,
-      {
-        htmlBody: correo.htmlBody,
-        cc: cc,
-        name: 'Financiera Cualli',
-        noReply: true,  // <--- AQUÍ ESTÁ LA MAGIA QUE RECORDABAS
-        replyTo: Session.getActiveUser().getEmail() 
-      }
-    );
-
-    registrarBitacora_(aviso, 'ENVIADO', 'OK');
-
-    return {
-      ok: true,
-      asunto: correo.asunto,
-      destinatarios: correo.destinatarios,
-      cc: cc
-    };
-  } catch (err) {
-    registrarBitacora_(aviso, 'ERROR', err.message);
-    return { ok: false, error: err.message };
-  }
-}
-// ─── VALIDACIONES ──────────────────────────────────────────────────────────
-
-/**
- * Valida que el aviso pueda enviarse.
- */
-function validarEnvio_(aviso, forzarReenvio = false) {
-  // 1. Cuenta STP
-  if (!aviso.cuentaSTP || String(aviso.cuentaSTP).trim() === '') {
-    return { ok: false, error: 'Sin cuenta STP en el catálogo Correos.' };
-  }
-
-  // 2. Correo destinatario
-  const destinatarios = parsearDestinatarios_(aviso.correo);
-  if (destinatarios.length === 0) {
-    return { ok: false, error: 'Sin correo destinatario válido.' };
-  }
-
-  // 3. No haber enviado el mismo aviso hoy (anti-doble envío)
-  // FIX: Si forzarReenvio es verdadero, se salta este bloqueo
-  if (!forzarReenvio && yaEnviadoHoy_(aviso.linea, aviso.tipoAviso)) {
-    return {
-      ok: false,
-      error: `Aviso ${aviso.tipoAviso} para esta línea ya fue enviado hoy. Si quieres reenviar, hazlo desde la bitácora.`
-    };
-  }
-
-
-  return { ok: true };
-}
-/**
- * Revisa la bitácora para ver si la línea + tipo ya se enviaron hoy.
- */
-function yaEnviadoHoy_(linea, tipoAviso) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sh = ss.getSheetByName(SHEETS.BITACORA);
-  if (!sh) return false;
-
-  const lastRow = sh.getLastRow();
-  if (lastRow < 3) return false;
-
-  const data = sh.getRange(3, 1, lastRow - 2, 8).getValues();
-  // Cols: 0:Timestamp 1:FechaVenc 2:TipoAviso 3:Linea 4:Cliente 5:Correos 6:Total 7:Status
-
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-
-  for (const row of data) {
-    const ts = row[0];
-    if (!ts || !(ts instanceof Date)) continue;
-    const tsDay = new Date(ts.getFullYear(), ts.getMonth(), ts.getDate());
-    if (tsDay.getTime() !== hoy.getTime()) continue;
-
-    if (String(row[3]) === String(linea) &&
-        String(row[2]) === String(tipoAviso) &&
-        String(row[7]) === 'ENVIADO') {
-      return true;
-    }
-  }
-  return false;
+function filaBitacora_(item, ahora, usuario, calc, status, mensaje, origen, tipo, destinatarios, correosTexto) {
+  const d = item.desglose;
+  const id = 'AV-' + item.linea + '-' + item.fechaNominal.replace(/-/g, '') + '-' + Utilities.formatDate(ahora, TZ, 'yyyyMMddHHmmss');
+  return [ahora, fechaDeKey_(item.fechaNominal), tipo, item.linea, item.cliente,
+          correosTexto || (destinatarios || []).join(', '), item.total, status, mensaje, usuario,
+          calc.frescura.rep1.corte.corteId, calc.frescura.rep9.corte.corteId, item.moneda, item.diasHabiles,
+          d.cuota, round2_(d.capVencido + d.intVencidos), round2_(d.moratoriosAcum + d.moratoriosProy), origen, id, fechaDeKey_(item.fechaPago)];
 }
 
-// ─── BITÁCORA ──────────────────────────────────────────────────────────────
+// ─── ENVÍO AUTOMÁTICO (trigger) ────────────────────────────────────────────
 
-/**
- * Registra una fila en Bitacora_Envios.
- * @param {Object} aviso - el aviso (puede ser parcial si hay error temprano)
- * @param {string} status - 'ENVIADO' | 'ERROR' | 'OMITIDO'
- * @param {string} mensaje - detalle u OK
- */
-function registrarBitacora_(aviso, status, mensaje) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sh = ss.getSheetByName(SHEETS.BITACORA);
-    if (!sh) return;
-
-    const lastRow = sh.getLastRow();
-    const newRow = lastRow < 2 ? 3 : lastRow + 1;
-    const fechaVenc = aviso.fechaVenc ? new Date(aviso.fechaVenc) : '';
-
-    sh.getRange(newRow, 1, 1, 9).setValues([[
-      new Date(),
-      fechaVenc,
-      aviso.tipoAviso || '',
-      aviso.linea || '',
-      aviso.nombre || aviso.cliente || '',
-      aviso.correo || '',
-      aviso.total || 0,
-      status,
-      mensaje || ''
-    ]]);
-
-    // Formato de la nueva fila
-    sh.getRange(newRow, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
-    sh.getRange(newRow, 2).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(newRow, 7).setNumberFormat('$#,##0.00');
-
-  } catch (err) {
-    // Silencioso: si la bitácora falla no debe tumbar el envío
-    Logger.log('Error registrando bitácora: ' + err.message);
-  }
-}
-
-// ─── HELPERS DE ACCESO A DATOS ─────────────────────────────────────────────
-
-/**
- * Re-ejecuta calcularAvisos() y devuelve el aviso para una línea específica.
- * (Recalculamos en cada envío para asegurar valores frescos del cache actual.)
- */
-function obtenerAvisoPorLinea_(linea) {
-  const result = calcularAvisos();
-  if (!result.ok) return null;
-  return result.avisos.find(a => String(a.linea) === String(linea)) || null;
-}
-
-/**
- * Lee el valor de CC_FIJO de la hoja Config.
- */
-function leerCcFijo_() {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sh = ss.getSheetByName(SHEETS.CONFIG);
-    if (!sh) return '';
-    const data = sh.getRange(3, 1, sh.getLastRow() - 2, 2).getValues();
-    for (const row of data) {
-      if (String(row[0]).trim() === 'CC_FIJO') {
-        return String(row[1] || '').trim();
-      }
-    }
-    return '';
-  } catch (err) {
-    return '';
-  }
-}
-
-// ─── API: BITÁCORA PARA EL FRONT ───────────────────────────────────────────
-
-/**
- * Lee los últimos N envíos de la bitácora para mostrarlos en la webapp.
- */
-function leerBitacora(limit) {
-  try {
-    const max = Math.max(1, Math.min(500, limit || 50));
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sh = ss.getSheetByName(SHEETS.BITACORA);
-    if (!sh) return { ok: true, registros: [] };
-
-    const lastRow = sh.getLastRow();
-    if (lastRow < 3) return { ok: true, registros: [] };
-
-    const startRow = Math.max(3, lastRow - max + 1);
-    const numRows = lastRow - startRow + 1;
-    const data = sh.getRange(startRow, 1, numRows, 9).getValues();
-
-    const registros = data.map(r => ({
-      timestamp: r[0] instanceof Date ? r[0].toISOString() : '',
-      fechaVenc: r[1] instanceof Date ? r[1].toISOString() : '',
-      tipoAviso: r[2] || '',
-      linea: r[3] || '',
-      cliente: r[4] || '',
-      correos: r[5] || '',
-      total: Number(r[6]) || 0,
-      status: r[7] || '',
-      mensaje: r[8] || ''
-    })).reverse();  // más reciente primero
-
-    return { ok: true, registros: registros };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+function envioAutomaticoDiario() {
+  if (!cfgBool_('ENVIO_AUTOMATICO', false)) return;
+  const hoy = hoyKey_();
+  if (!esHabil_(hoy)) return;
+  const calc = calcularCola_();
+  if (!calc.ok) { chatEnviar_('⚠️ *Envío automático detenido:* ' + calc.error); return; }
+  const listas = calc.items.filter(i => i.estado === 'LISTA').map(i => i.key);
+  const bloqueadas = calc.items.filter(i => i.estado === 'BLOQUEADA' || i.estado === 'REVISAR');
+  if (!listas.length && !bloqueadas.length) return;
+  const res = listas.length ? ejecutarEnvios_(listas, { origen: 'AUTO' }) : { ok: true, enviados: 0, errores: 0, omitidos: 0, pendientes: [] };
+  chatResumenEnvio_(res, bloqueadas, 'automático');
 }
