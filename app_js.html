@@ -2,20 +2,25 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════════════
    COBRANZA CUALLI · Front
-   Hoy (día guiado) · Avisos · Cartera · Historial · Ajustes de saldo ·
-   Datos de clientes · Configuración
+   Hoy · Reportes · Avisos · Hoja de trabajo · Cartera · Historial de envíos ·
+   Ajustes de saldo · Datos de clientes · Configuración
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const S = {
-  estado: null, cola: null, cartera: null, resumen: null, bitacora: null, ajustes: null, datos: null, config: null,
-  vista: 'hoy', cargasLista: [], cargaSeq: 0, excl: new Set(), busqueda: '',
-  filtroCartera: 'todos', mostrarCartera: 80, filtroHist: { status: '', texto: '' }, listaDatos: 'sinTasa'
+  estado: null, cola: null, cartera: null, resumen: null, hoja: null, saldosV: null, cortes: null, bitacora: null, ajustes: null, datos: null, config: null,
+  vista: 'hoy', carga: { rep1: null, rep9: null }, cargaSeq: 0, excl: new Set(), busqueda: '',
+  filtroCartera: 'todos', mostrarCartera: 80, filtroHist: { status: '', texto: '' }, listaDatos: 'sinTasa',
+  hojaTab: 'hoja', hojaFiltro: 'todos', hojaMoneda: '', hojaBusqueda: '', resaltar: null
 };
 
 const DOW = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const DOW_L = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const MES_L = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const REP = {
+  rep1: { n: 'Rep1', sello: 'R1', sub: 'Próximos vencimientos', unidad: ['cuota', 'cuotas'] },
+  rep9: { n: 'Rep9', sello: 'R9', sub: 'Saldos e intereses por línea', unidad: ['línea', 'líneas'] }
+};
 
 /* ─── Utilidades ───────────────────────────────────────────────────────── */
 const $ = (s, r) => (r || document).querySelector(s);
@@ -24,6 +29,7 @@ const esc = s => String(s === null || s === undefined ? '' : s).replace(/&/g, '&
 const pl = (n, uno, varios) => n + ' ' + (n === 1 ? uno : varios);
 const can = p => !!(S.estado && S.estado.permisos && S.estado.permisos.indexOf(p) >= 0);
 const ico = (id, cls) => '<svg class="' + (cls || '') + '" width="20" height="20" aria-hidden="true"><use href="#g-' + id + '"/></svg>';
+const icoI = id => '<svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-' + id + '"/></svg>';
 
 function api(fn) {
   const args = Array.prototype.slice.call(arguments, 1);
@@ -39,24 +45,29 @@ function dCorta(k) { const d = pk(k); return DOW[d.getUTCDay()] + ' ' + d.getUTC
 function dLarga(k) { const d = pk(k); return DOW_L[d.getUTCDay()] + ' ' + d.getUTCDate() + ' de ' + MES_L[d.getUTCMonth()]; }
 function dLargaAnio(k) { return dLarga(k) + ' de ' + k.slice(0, 4); }
 function dma(k) { return k ? k.slice(8, 10) + '/' + k.slice(5, 7) + '/' + k.slice(0, 4) : ''; }
-function dinero(n, mon) {
-  const v = Number(n) || 0, p = Math.abs(v).toFixed(2).split('.');
-  return (v < 0 ? '-' : '') + (mon === 'USD' ? 'US$' : '$') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
-}
-function dineroC(n, mon) {   // sin centavos, para resúmenes
-  const v = Math.round(Number(n) || 0);
-  return (v < 0 ? '-' : '') + (mon === 'USD' ? 'US$' : '$') + Math.abs(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
+function dm(k) { return k ? k.slice(8, 10) + '/' + k.slice(5, 7) : ''; }
+const miles = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function n2(v) { const x = Number(v) || 0, p = Math.abs(x).toFixed(2).split('.'); return (x < 0 ? '-' : '') + miles(p[0]) + '.' + p[1]; }
+function dinero(n, mon) { const v = Number(n) || 0; return (v < 0 ? '-' : '') + (mon === 'USD' ? 'US$' : '$') + n2(Math.abs(v)); }
+function dineroC(n, mon) { const v = Math.round(Number(n) || 0); return (v < 0 ? '-' : '') + (mon === 'USD' ? 'US$' : '$') + miles(Math.abs(v)); }
+const pct = v => Number(((Number(v) || 0) * 100).toFixed(2)) + '%';
 function horaDe(ts) { const m = String(ts || '').match(/(\d{2}):(\d{2})/); return m ? m[1] + ':' + m[2] : ''; }
 function fechaDe(ts) { const m = String(ts || '').match(/^(\d{4}-\d{2}-\d{2})/); return m ? m[1] : ''; }
-function cuandoTxt(ts) {   // "hoy a las 11:00" / "mié 26 ago a las 11:00"
+function cuandoTxt(ts) {
   const f = fechaDe(ts), h = horaDe(ts), hoy = S.estado && S.estado.tanda ? S.estado.tanda.hoy : '';
   return (f === hoy ? 'hoy' : (f ? dCorta(f) : '')) + (h ? ' a las ' + h : '');
 }
-function montosTxt(items) {
-  const m = {}; items.forEach(i => { m[i.moneda] = (m[i.moneda] || 0) + i.total; });
-  const t = Object.keys(m).sort().map(k => dineroC(m[k], k) + ' ' + k);
-  return t.join(' y ');
+function sumaMon(items, fn) { const m = {}; items.forEach(i => { m[i.moneda] = (m[i.moneda] || 0) + fn(i); }); return m; }
+function montosTxt(items, fn) {
+  const m = sumaMon(items, fn || (i => i.total));
+  return Object.keys(m).sort().map(k => dineroC(m[k], k) + (k === 'MXN' ? ' MXN' : '')).join(' y ');
+}
+function montoPrincipal(items, fn) {   // {v: "$1,234", extra: "y US$500"}
+  const m = sumaMon(items, fn), ks = Object.keys(m).sort();
+  if (!ks.length) return { v: '$0', extra: '' };
+  const p = ks.indexOf('MXN') >= 0 ? 'MXN' : ks[0];
+  const otros = ks.filter(k => k !== p && Math.round(m[k]) !== 0).map(k => dineroC(m[k], k));
+  return { v: dineroC(m[p], p), extra: otros.length ? 'y ' + otros.join(' y ') : '' };
 }
 
 function toast(msg, tipo) {
@@ -77,14 +88,14 @@ function abrirModal(o) {
   cerrarModal();
   const velo = document.createElement('div');
   velo.className = 'velo centro';
-  velo.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-label="' + esc(o.titulo) + '"><div class="modal-cab"><h2>' + esc(o.titulo) + '</h2>' +
+  velo.innerHTML = '<div class="modal ' + (o.ancho ? 'ancho' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(o.titulo) + '"><div class="modal-cab"><h2>' + esc(o.titulo) + '</h2>' +
     (o.fijo ? '' : '<button class="cerrar" aria-label="Cerrar">×</button>') + '</div><div class="modal-cuerpo">' + o.cuerpo + '</div><div class="modal-pie">' + (o.pie || '') + '</div></div>';
   if (!o.fijo) {
     velo.addEventListener('mousedown', e => { if (e.target === velo) cerrarModal(); });
     $('.cerrar', velo).addEventListener('click', cerrarModal);
   }
   $('#modal-root').appendChild(velo);
-  const foco = $('textarea, input, .btn.principal', velo); if (foco) foco.focus();
+  const foco = $('textarea, input:not([type=checkbox]), .btn.principal', velo); if (foco && !o.sinFoco) foco.focus();
   return velo;
 }
 function cerrarModal() { $('#modal-root').innerHTML = ''; }
@@ -92,7 +103,7 @@ function cerrarModal() { $('#modal-root').innerHTML = ''; }
 function abrirLateral(titulo, sub) {
   cerrarLateral();
   const velo = document.createElement('div');
-  velo.className = 'velo lado';
+  velo.className = 'velo lado-der';
   velo.innerHTML = '<aside class="lateral" role="dialog" aria-modal="true" aria-label="' + esc(titulo) + '"><div class="lateral-cab"><div><h2>' + esc(titulo) + '</h2><p>' + esc(sub || '') + '</p></div><button class="cerrar" aria-label="Cerrar">×</button></div>' +
     '<div class="lateral-cuerpo"><div class="cargando"><span class="giro"></span>Cargando…</div></div><div class="lateral-pie oculto"></div></aside>';
   velo.addEventListener('mousedown', e => { if (e.target === velo) cerrarLateral(); });
@@ -104,20 +115,38 @@ function cerrarLateral() { $('#lateral-root').innerHTML = ''; }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('#modal-root').firstChild) cerrarModal(); else cerrarLateral(); } });
 
 /* ─── Arranque y navegación ────────────────────────────────────────────── */
-const VISTAS = ['hoy', 'avisos', 'cartera', 'historial', 'ajustes', 'datos', 'config'];
+const VISTAS = ['hoy', 'reportes', 'avisos', 'hoja', 'cartera', 'historial', 'ajustes', 'datos', 'config'];
+const RENDER = {
+  hoy: () => pintarHoy(), reportes: () => cargarReportes(), avisos: () => pintarAvisos(), hoja: () => cargarHoja(),
+  cartera: () => cargarCartera(), historial: () => cargarHistorial(), ajustes: () => cargarAjustes(), datos: () => cargarDatos(), config: () => cargarConfig()
+};
 
 async function arrancar() {
   if (S.arrancado) return; S.arrancado = true;
-  $('#v-hoy').innerHTML = '<div class="pagina"><div class="cargando"><span class="giro"></span>Cargando…</div></div>';
+  $('#v-hoy').innerHTML = '<div class="cargando"><span class="giro"></span>Cargando…</div>';
   const e = await api('getEstadoInicial');
-  if (!e.ok) { $('#v-hoy').innerHTML = '<div class="pagina"><div class="vacio"><b>No se pudo abrir la plataforma</b>' + esc(e.error) + '</div></div>'; return; }
+  if (!e.ok) { $('#v-hoy').innerHTML = '<div class="panel"><div class="vacio"><b>No se pudo abrir la plataforma</b>' + esc(e.error) + '</div></div>'; return; }
   S.estado = e;
   $('#yo-correo').textContent = e.usuario.email;
+  $('#yo-inicial').textContent = (e.usuario.email || '?').charAt(0).toUpperCase();
   $('#yo-rol').textContent = ({ ADMIN: 'Administración', COORDINADORA: 'Coordinación', GERENTE: 'Gerencia', AUDITORIA: 'Consulta', SIN_ACCESO: 'Sin acceso' })[e.usuario.rol] || e.usuario.rol;
-  pintarBanners();
+  pintarBanners(); pintarCtx();
   if (e.inicializado && e.cortes.rep1.cargado && e.cortes.rep9.cargado) await cargarCola(true);
   api('getResumenInicio').then(r => { S.resumen = r; if (S.vista === 'hoy') pintarHoy(); });
   irA('hoy');
+}
+
+function pintarCtx() {
+  const e = S.estado; if (!e) return;
+  const t = e.tanda;
+  $('#ctx-fecha').textContent = dLargaAnio(t.hoy);
+  $('#ctx-tanda').textContent = t.esHabil ? 'Esta tanda cubre vencimientos del ' + dma(t.ventana.nominalDesde) + ' al ' + dma(t.ventana.nominalHasta) : 'Hoy es ' + t.motivoInhabil.toLowerCase() + ': no sale ningún aviso';
+  $('#ctx-reportes').innerHTML = ['rep1', 'rep9'].map(tp => {
+    const c = e.cortes[tp], st = estadoReporte(tp);
+    const txt = st === 'falta' ? 'sin cargar' : (st === 'vencido' ? 'vencido, ' : '') + cuandoTxt(c.fechaHora);
+    return '<button class="ctx-rep" data-ctx-rep title="Ir a Reportes">' + ico(st === 'ok' ? 'ok' : st === 'vencido' ? 'warn' : 'vacio') + '<b>' + REP[tp].n + '</b><span>' + esc(txt) + '</span></button>';
+  }).join('');
+  $$('[data-ctx-rep]').forEach(b => b.addEventListener('click', () => irA('reportes')));
 }
 
 function pintarBanners() {
@@ -136,13 +165,13 @@ function irA(v) {
   $$('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.nav === v ? 'page' : 'false'));
   VISTAS.forEach(id => $('#v-' + id).classList.toggle('oculto', id !== v));
   window.scrollTo(0, 0);
-  ({ hoy: pintarHoy, avisos: pintarAvisos, cartera: cargarCartera, historial: cargarHistorial, ajustes: cargarAjustes, datos: cargarDatos, config: cargarConfig })[v]();
+  RENDER[v]();
 }
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button[data-nav]'); if (b) irA(b.dataset.nav); });
 
 async function refrescarEstado() {
   const e = await api('getEstadoInicial');
-  if (e.ok) { S.estado = e; pintarBanners(); }
+  if (e.ok) { S.estado = e; pintarBanners(); pintarCtx(); }
 }
 
 function contadores() {
@@ -153,7 +182,7 @@ function contadores() {
   set('cuenta-datos', a && a.cartera ? a.sinCorreo.length + a.sinStp.length + a.correoInvalido.length : 0);
 }
 
-function grupos() {   // cola agrupada con palabras de uso diario
+function grupos() {
   const it = S.cola && S.cola.ok ? S.cola.items : [];
   return {
     listos: it.filter(i => i.estado === 'LISTA'),
@@ -181,143 +210,178 @@ function textoHeroe() {
   if (!t.esHabil) return { h: 'Hoy es ' + t.motivoInhabil.toLowerCase() + '. No sale ningún aviso.', s: 'La siguiente tanda empieza el ' + dLarga(t.d0) + '.' };
   const rango = 'vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta);
   if (r1 === 'ok' && r9 === 'ok' && S.cola && S.cola.ok) {
-    const g = grupos(), st = S.cola.stats, n = g.listos.length, aten = g.revisar.length + g.bloqueadas.length;
+    const g = grupos(), n = g.listos.length, aten = g.revisar.length + g.bloqueadas.length;
     if (n > 0) {
       const a1 = g.listos.filter(i => i.accion === 'PREVENTIVO').length, a2 = n - a1;
       const partes = [a1 ? pl(a1, 'primer aviso', 'primeros avisos') : '', a2 ? pl(a2, 'segundo aviso', 'segundos avisos') : ''].filter(Boolean).join(' y ');
-      return { h: n === 1 ? 'Tienes 1 aviso listo para enviar.' : 'Tienes ' + n + ' avisos listos para enviar.', s: partes + ', por ' + montosTxt(g.listos) + '.' + (aten ? ' Otros ' + aten + ' necesitan tu revisión antes.' : '') };
+      return { h: n === 1 ? 'Hay 1 aviso listo para enviar.' : 'Hay ' + n + ' avisos listos para enviar.', s: partes + ', por ' + montosTxt(g.listos) + '.' + (aten ? ' Otros ' + aten + ' necesitan tu revisión antes.' : '') };
     }
     if (aten > 0) return { h: aten === 1 ? 'Hay 1 aviso que necesita tu atención.' : 'Hay ' + aten + ' avisos que necesitan tu atención.', s: 'Completa lo que falta y podrás enviarlos.' };
     const prox = S.cola.items.map(i => i.programadaPara).filter(Boolean).sort()[0];
     return { h: 'Hoy no hay avisos por enviar.', s: prox ? 'El siguiente aviso sale el ' + dLarga(prox) + '.' : 'No hay cuotas pendientes de aviso con los reportes cargados.' };
   }
-  if (r1 === 'falta' && r9 === 'falta') return { h: 'Hoy toca descargar el Rep1 y el Rep9.', s: 'Rep1 con ' + rango + '. Rep9 con corte de hoy. Súbelos aquí abajo y la plataforma calcula los avisos.' };
+  if (r1 === 'falta' && r9 === 'falta') return { h: 'Hoy toca descargar el Rep1 y el Rep9.', s: 'Rep1 con ' + rango + '. Rep9 con corte de hoy. Súbelos en las dos tarjetas de abajo y la plataforma calcula los avisos.' };
   if (r1 === 'vencido' || r9 === 'vencido') return { h: 'Los reportes ya no están al día.', s: 'Descarga unos nuevos: Rep1 con ' + rango + ' y Rep9 con corte de hoy.' };
   return { h: r1 === 'falta' ? 'Falta subir el Rep1.' : 'Falta subir el Rep9.', s: r1 === 'falta' ? 'Descárgalo con ' + rango + '.' : 'Descárgalo con corte de hoy.' };
 }
 
 function avisoHoyTxt(t) {
   if (!t.esHabil) return '';
-  const a2 = t.linea.find(d => d.aviso2), a1 = t.linea.find(d => d.aviso1);
-  const p = [];
+  const a2 = t.linea.find(d => d.aviso2), a1 = t.linea.find(d => d.aviso1), p = [];
   if (a2) p.push('el segundo aviso a quienes pagan el ' + dLarga(a2.fecha));
   if (a1) p.push('el primero a quienes pagan el ' + dLarga(a1.fecha));
-  return p.length ? '<p class="regla-hoy">Hoy sale ' + p.join(' y ') + '.</p>' : '';
+  return p.length ? '<p class="nota" style="margin-top:12px;font-size:14.5px;color:var(--g700)">Hoy sale ' + p.join(' y ') + '.</p>' : '';
 }
 
 function reglaHTML(t) {
-  const cel = t.linea;
-  const ini = cel.findIndex(d => d.enRep1), fin = cel.length - 1 - cel.slice().reverse().findIndex(d => d.enRep1);
   let prevMes = -1;
-  const celdas = cel.map(d => {
+  const celdas = t.linea.map(d => {
     const m = Number(d.fecha.slice(5, 7)) - 1, mes = m !== prevMes ? MES[m] : ''; prevMes = m;
     let marca = '';
     if (d.esHoy) marca = '<span class="marca-dia">Hoy</span>';
     else if (d.aviso1) marca = '<span class="marca-dia a1">1.er aviso</span>';
     else if (d.aviso2) marca = '<span class="marca-dia">2.º aviso</span>';
-    let pie = '';
-    if (!d.habil) pie = '<span class="etq" title="' + esc(d.motivo) + '">' + esc(d.motivo) + '</span>';
-    else if (d.idx > 0) pie = '<span class="etq">día ' + d.idx + '</span>';
-    else pie = '<span class="etq"></span>';
-    return '<div class="dia ' + (d.habil ? '' : 'inhabil ') + (d.esHoy ? 'hoy' : '') + '">' + marca + '<span class="dow">' + DOW[d.dow] + '</span><span class="dnum">' + Number(d.fecha.slice(8)) + '</span><span class="mes">' + mes + '</span>' + pie + '</div>';
+    const pie = !d.habil ? '<span class="etq" title="' + esc(d.motivo) + '">' + esc(d.motivo) + '</span>' : (d.idx > 0 ? '<span class="etq">día ' + d.idx + '</span>' : '<span class="etq"></span>');
+    return '<div class="dia ' + (d.habil ? '' : 'inhabil ') + (d.enRep1 ? 'cubre ' : '') + (d.esHoy ? 'hoy' : '') + '">' + marca + '<span class="dow">' + DOW[d.dow] + '</span><span class="dnum">' + Number(d.fecha.slice(8)) + '</span><span class="mes">' + mes + '</span>' + pie + '</div>';
   }).join('');
-  const barra = cel.map((d, i) => '<i class="' + (d.enRep1 ? 'on ' : '') + (i === ini ? 'ini ' : '') + (i === fin ? 'fin' : '') + '"></i>').join('');
-  return '<div class="regla" role="img" aria-label="Próximos días hábiles">' + celdas + '</div><div class="regla-barra" aria-hidden="true">' + barra + '</div>' +
-    avisoHoyTxt(t) +
-    '<div class="regla-pie"><span><i></i>Vencimientos que cubre el Rep1 de esta tanda</span><span><i class="raya"></i>Fin de semana o inhábil: no cuenta</span>' +
-    '<span>Un pago que cae en día inhábil se avisa y se cobra el siguiente día hábil.</span></div>';
+  return '<div class="regla" style="--n:' + t.linea.length + '" role="img" aria-label="Próximos días hábiles">' + celdas + '</div>' +
+    '<div class="leyenda"><span><i class="h"></i>Hoy</span><span><i></i>Vencimientos que cubre el Rep1 de esta tanda</span><span><i class="raya"></i>Fin de semana o inhábil: no cuenta</span></div>' +
+    '<p class="nota" style="margin-top:6px">Un pago que cae en día inhábil se avisa y se cobra el siguiente día hábil.</p>';
 }
 
-function tarjetaReporte(tipo) {
-  const e = S.estado, c = e.cortes[tipo], v = e.tanda.ventana, st = estadoReporte(tipo), esR1 = tipo === 'rep1';
-  const chip = st === 'ok' ? '<span class="chip oscuro">' + ico('ok') + 'Al día</span>' : st === 'vencido' ? '<span class="chip rojo">Vencido</span>' : '<span class="chip">Falta</span>';
-  let det = '';
-  if (st === 'falta') det = esR1 ? 'Todavía no has subido el Rep1.' : 'Todavía no has subido el Rep9.';
-  else {
-    det = 'Cargado ' + cuandoTxt(c.fechaHora) + (c.usuario ? ' por ' + esc(c.usuario.split('@')[0]) : '') + ', ' + pl(c.filas, esR1 ? 'cuota' : 'línea', esR1 ? 'cuotas' : 'líneas') + '.';
-    if (st === 'vencido') det += ' Tiene ' + pl(c.edad, 'día hábil', 'días hábiles') + ' y el máximo es ' + c.max + '.';
-  }
-  const filtro = st === 'ok' ? '' : '<div class="filtro">' + (esR1
-    ? 'Al descargarlo, filtra Fecha Vencimiento del <b>' + dma(v.nominalDesde) + '</b> <button class="copiar" data-copiar="' + dma(v.nominalDesde) + '">copiar</button> al <b>' + dma(v.nominalHasta) + '</b> <button class="copiar" data-copiar="' + dma(v.nominalHasta) + '">copiar</button>'
-    : 'Al descargarlo, usa <b>corte de hoy</b> con todas las líneas, en pesos y en dólares.') + '</div>';
-  return '<div class="reporte"><div class="reporte-cab"><div><h4>' + (esR1 ? 'Rep1' : 'Rep9') + '</h4><div class="detalle" style="margin-top:0">' + (esR1 ? 'Próximos vencimientos' : 'Saldos e intereses') + '</div></div>' + chip + '</div><p class="detalle">' + det + '</p>' + filtro + '</div>';
+function kpisHoyHTML() {
+  if (!(S.cola && S.cola.ok)) return '';
+  const it = S.cola.items, hoyList = it.filter(i => i.accion), g = grupos();
+  const tot = montoPrincipal(it, i => i.total), cap = montoPrincipal(it, i => i.desglose.capVencido), mor = montoPrincipal(it, i => i.desglose.moratoriosAcum + i.desglose.moratoriosProy);
+  const conVenc = it.filter(i => i.desglose.capVencido > 0.005).length;
+  return '<div class="kpis">' +
+    '<div class="kpi dest"><div class="t">Por cobrar en la tanda</div><div class="v">' + tot.v + '</div><div class="m">' + pl(it.length, 'cuota', 'cuotas') + (tot.extra ? ', ' + esc(tot.extra) : '') + '</div></div>' +
+    '<div class="kpi"><div class="t">Capital vencido incluido</div><div class="v ' + (conVenc ? 'rojo' : '') + '">' + cap.v + '</div><div class="m">' + pl(conVenc, 'cliente', 'clientes') + ' con atraso' + (cap.extra ? ', ' + esc(cap.extra) : '') + '</div></div>' +
+    '<div class="kpi"><div class="t">Moratorios incluidos</div><div class="v">' + mor.v + '</div><div class="m">Acumulados más los del periodo</div></div>' +
+    '<div class="kpi"><div class="t">Avisos por enviar hoy</div><div class="v">' + hoyList.length + '</div><div class="m">' + (g.revisar.length + g.bloqueadas.length ? pl(g.revisar.length + g.bloqueadas.length, 'necesita atención', 'necesitan atención') : 'Ninguno con observaciones') + '</div></div></div>';
 }
 
-function cargasHTML() {
-  return S.cargasLista.map(c => {
-    const nombre = esc(c.archivo), tipoTxt = c.tipo ? (c.tipo === 'rep1' ? 'Rep1' : 'Rep9') : 'Archivo';
-    if (c.estado === 'leyendo' || c.estado === 'validando' || c.estado === 'guardando')
-      return '<div class="carga"><div class="carga-cab"><span class="giro"></span>' + ({ leyendo: 'Leyendo ', validando: 'Revisando ', guardando: 'Guardando ' })[c.estado] + nombre + '…</div></div>';
-    if (c.estado === 'error')
-      return '<div class="carga error"><div class="carga-cab">' + ico('error') + 'No se pudo usar ' + nombre + '</div><ul><li>' + esc(c.error) + '</li>' + (c.detalles || []).map(d => '<li>' + esc(d) + '</li>').join('') + '</ul><div class="acciones"><button class="btn chico" data-cerrar-carga="' + c.id + '">Cerrar</button></div></div>';
-    const v = c.val, warns = (v.avisos || []).filter(a => a.nivel === 'warn'), infos = (v.avisos || []).filter(a => a.nivel !== 'warn');
-    const chips = c.tipo === 'rep1' ? '<div class="fechas-rep1">' + v.porFecha.map(f => '<span class="' + (f.fecha >= v.requerido.desde && f.fecha <= v.requerido.hasta ? 'dentro' : '') + '">' + dCorta(f.fecha) + ': ' + f.n + '</span>').join('') + '</div>' : '';
-    return '<div class="carga revisar"><div class="carga-cab">' + ico('warn') + '<span>Revisa ' + nombre + ' antes de guardarlo</span></div>' +
-      '<p style="margin-top:6px;font-size:14px">' + tipoTxt + ' con ' + pl(v.filas, c.tipo === 'rep1' ? 'cuota' : 'línea', c.tipo === 'rep1' ? 'cuotas' : 'líneas') + '. Los vencimientos que trae están marcados abajo; los que caen dentro del rango de esta tanda van resaltados.</p>' + chips +
-      '<ul>' + warns.map(w => '<li>' + esc(w.texto) + '</li>').join('') + infos.map(w => '<li style="color:var(--gris-600)">' + esc(w.texto) + '</li>').join('') + '</ul>' +
-      '<div class="acciones"><button class="btn principal" data-guardar-carga="' + c.id + '">Guardar de todos modos</button><button class="btn" data-cerrar-carga="' + c.id + '">Cambiar archivo</button></div></div>';
-  }).join('');
+function pendientesHTML() {
+  if (!(S.cola && S.cola.ok)) return '';
+  const g = grupos(), lista = g.bloqueadas.concat(g.revisar);
+  const cab = '<div class="panel-cab"><div><h3>Necesita tu atención</h3><p>' + (lista.length ? pl(lista.length, 'aviso', 'avisos') + ' con un dato faltante u observación' : 'Nada pendiente por ahora') + '</p></div>' + (lista.length ? '<button class="btn chico" data-ir="avisos">Ver en Avisos</button>' : '') + '</div>';
+  if (!lista.length) return '<div class="panel">' + cab + '<div class="vacio" style="padding:30px"><b>Todo en orden</b>Los avisos de hoy no tienen observaciones.</div></div>';
+  return '<div class="panel">' + cab + '<div class="tabla-wrap" style="border:0;border-radius:0"><table class="tabla"><tbody>' + lista.slice(0, 6).map(i =>
+    '<tr class="clic" data-cuota="' + esc(i.key) + '"><td>' + (i.estado === 'BLOQUEADA' ? ico('error') : ico('warn')) + '</td><td><div class="quien"><b>' + esc(i.cliente) + '</b><small>Línea ' + esc(i.linea) + '</small></div></td><td class="motivo">' + esc(motivos(i)[0] || '') + '</td></tr>').join('') +
+    '</tbody></table></div>' + (lista.length > 6 ? '<div class="panel-cuerpo nota">Y ' + (lista.length - 6) + ' más en Avisos.</div>' : '') + '</div>';
+}
+
+function carteraResumenHTML() {
+  const R = S.resumen && S.resumen.ok && S.resumen.hayRep9 ? S.resumen : null;
+  const cab = '<div class="panel-cab"><div><h3>Cartera</h3><p>Según el Rep9 cargado</p></div><button class="btn chico" data-ir="cartera">Ver cartera</button></div>';
+  if (!R) return '<div class="panel">' + cab + '<div class="vacio" style="padding:30px">Sube el Rep9 para ver la cartera.</div></div>';
+  const monedas = Object.keys(R.cartera).sort();
+  return '<div class="panel">' + cab + '<div class="panel-cuerpo"><div class="cc-datos">' + monedas.map(m =>
+    '<div><b>' + dineroC(R.cartera[m].saldoTotal, m) + '</b><span>Saldo total en ' + m + ', ' + pl(R.cartera[m].lineas, 'línea', 'líneas') + '</span></div>' +
+    '<div><b style="color:var(--ladrillo)">' + dineroC(R.cartera[m].saldoVencido, m) + '</b><span>Vencido en ' + m + ', ' + pl(R.cartera[m].conVencido, 'cliente', 'clientes') + '</span></div>').join('') +
+    '<div><b>' + R.avisosHoy + '</b><span>' + (R.avisosHoy === 1 ? 'aviso enviado hoy' : 'avisos enviados hoy') + '</span></div><div><b>' + R.avisosSemana + '</b><span>avisos en los últimos 7 días</span></div></div></div></div>';
 }
 
 function pintarHoy() {
   const raiz = $('#v-hoy'); if (!raiz || !S.estado) return;
   const e = S.estado, t = e.tanda, tx = textoHeroe();
-  const r1 = estadoReporte('rep1'), r9 = estadoReporte('rep9'), reportesOk = r1 === 'ok' && r9 === 'ok';
-  const g = grupos(), colaOk = S.cola && S.cola.ok && reportesOk;
-  const aten = g.revisar.length + g.bloqueadas.length;
-  const hecho1 = reportesOk, activo1 = !reportesOk;
-  const paso2 = !colaOk ? 'espera' : aten > 0 ? 'activo' : 'hecho';
-  const paso3 = !colaOk ? 'espera' : g.listos.length > 0 ? 'activo' : 'hecho';
-  const chica = reportesOk && !S.cargasLista.length;
-  const zona = can('cargar')
-    ? '<div class="zona ' + (chica ? 'chica' : '') + '" data-zona tabindex="0" role="button">' + ico('subir') + '<strong>' + (chica ? '¿Descargaste uno nuevo? Suéltalo aquí' : 'Suelta aquí el Rep1 y el Rep9') + '</strong><span>' + (chica ? 'o haz clic para elegirlo' : 'Puedes soltar los dos juntos. La plataforma reconoce cuál es cuál y los guarda sola.') + '</span></div><input type="file" accept=".xlsx,.xls" multiple hidden data-archivo>'
-    : '<p class="detalle">Tu rol no permite cargar reportes.</p>';
-
-  let pasoRevisa, pasoEnvia;
-  if (paso2 === 'espera') pasoRevisa = '<p>Aparecerá aquí lo que necesite tu atención.</p>';
-  else if (aten > 0) pasoRevisa = '<div class="paso-linea"><div class="dato"><b>' + aten + '</b>' + (aten === 1 ? 'aviso necesita' : 'avisos necesitan') + ' tu atención<small>Les falta un dato o tienen una observación. Se resuelven en un clic.</small></div><button class="btn oscuro" data-ir="avisos">Ver cuáles son</button></div>';
-  else pasoRevisa = '<p>No hay avisos con observaciones.</p>';
-  if (paso3 === 'espera') pasoEnvia = '<p>Cuando los reportes estén al día, aquí verás cuántos avisos puedes mandar.</p>';
-  else if (g.listos.length > 0) pasoEnvia = '<div class="paso-linea"><div class="dato"><b>' + g.listos.length + '</b>' + (g.listos.length === 1 ? 'aviso listo' : 'avisos listos') + '<small>' + esc(montosTxt(g.listos)) + '. Podrás revisar la lista antes de confirmar.</small></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" data-ir="avisos">Ver los avisos</button>' + (can('enviar') ? '<button class="btn principal grande" data-enviar-listos>Enviar ' + g.listos.length + (g.listos.length === 1 ? ' aviso' : ' avisos') + '</button>' : '') + '</div></div>';
-  else pasoEnvia = '<p>No hay avisos listos para enviar hoy.</p>';
-
-  const R = S.resumen && S.resumen.ok && S.resumen.hayRep9 ? S.resumen : null;
-  const resumen = R ? '<div class="resumen">' + Object.keys(R.cartera).sort().map(m => '<div><b>' + dineroC(R.cartera[m].saldoTotal, m) + '</b><span>Cartera en ' + m + ', ' + pl(R.cartera[m].lineas, 'línea', 'líneas') + '</span></div>' +
-    '<div><b>' + dineroC(R.cartera[m].saldoVencido, m) + '</b><span>Vencido en ' + m + ', ' + pl(R.cartera[m].conVencido, 'cliente', 'clientes') + ' con atraso</span></div>').join('') +
-    '<div><b>' + R.avisosHoy + '</b><span>' + (R.avisosHoy === 1 ? 'aviso enviado hoy' : 'avisos enviados hoy') + '</span></div><div><b>' + R.avisosSemana + '</b><span>avisos en los últimos 7 días</span></div></div>' : '';
+  const reportesOk = estadoReporte('rep1') === 'ok' && estadoReporte('rep9') === 'ok';
+  const g = grupos(), colaOk = !!(S.cola && S.cola.ok && reportesOk), aten = g.revisar.length + g.bloqueadas.length;
+  let acc = '';
+  if (colaOk && g.listos.length && can('enviar')) acc = '<button class="btn principal grande" data-enviar-listos>' + icoI('enviar') + 'Enviar ' + pl(g.listos.length, 'aviso', 'avisos') + '</button><button class="btn grande" data-ir="avisos">Revisar la lista</button>';
+  else if (!reportesOk && can('cargar')) acc = '<button class="btn principal grande" data-ir="reportes">' + icoI('reportes') + 'Subir los reportes</button>';
+  else if (aten) acc = '<button class="btn oscuro grande" data-ir="avisos">Ver lo que necesita atención</button>';
+  const rec = [
+    ['Reportes al día', reportesOk ? 'hecho' : 'activo'],
+    ['Pendientes revisados', !colaOk ? 'espera' : aten ? 'activo' : 'hecho'],
+    ['Avisos enviados', !colaOk ? 'espera' : g.listos.length ? 'activo' : 'hecho']
+  ].map(r => '<span class="rec ' + r[1] + '">' + ico(r[1] === 'hecho' ? 'ok' : r[1] === 'activo' ? 'actual' : 'vacio') + r[0] + '</span>').join('');
 
   raiz.innerHTML =
-    '<div class="heroe"><div class="heroe-in"><p class="fecha">' + dLargaAnio(t.hoy) + '</p><h1>' + esc(tx.h) + '</h1><p class="sub">' + esc(tx.s) + '</p>' + reglaHTML(t) + '</div></div>' +
-    '<div class="pagina" style="padding-top:34px"><ol class="pasos">' +
-    '<li class="paso ' + (hecho1 ? 'hecho' : 'activo') + '"><div class="paso-num">' + (hecho1 ? '✓' : '1') + '</div><div><div class="paso-cab"><div><h3>Sube los reportes</h3><p>' + (reportesOk ? 'Los dos están al día.' : 'Necesito el Rep1 y el Rep9 más recientes.') + '</p></div></div><div class="paso-cuerpo">' + zona + '<div class="cargas" id="cargas">' + cargasHTML() + '</div><div class="reportes">' + tarjetaReporte('rep1') + tarjetaReporte('rep9') + '</div></div></div></li>' +
-    '<li class="paso ' + paso2 + '"><div class="paso-num">' + (paso2 === 'hecho' ? '✓' : '2') + '</div><div><div class="paso-cab"><div><h3>Revisa lo pendiente</h3></div></div><div class="paso-cuerpo">' + pasoRevisa + '</div></div></li>' +
-    '<li class="paso ' + paso3 + '"><div class="paso-num">' + (paso3 === 'hecho' ? '✓' : '3') + '</div><div><div class="paso-cab"><div><h3>Envía los avisos</h3></div></div><div class="paso-cuerpo">' + pasoEnvia + '</div></div></li>' +
-    '</ol>' + resumen + '</div>';
-  enlazarHoy(raiz);
+    '<div class="panel brief"><h1>' + esc(tx.h) + '</h1><p class="sub">' + esc(tx.s) + '</p>' +
+    (acc ? '<div class="brief-acc">' + acc + '</div>' : '') + '<div class="recorrido">' + rec + '</div>' +
+    '<div class="calendario"><h3>Calendario de la tanda</h3>' + reglaHTML(t) + avisoHoyTxt(t) + '</div></div>' +
+    '<div style="height:18px"></div>' + kpisHoyHTML() +
+    '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
+    '<div class="dos-col">' + pendientesHTML() + carteraResumenHTML() + '</div>';
+  enlazarGeneral(raiz); enlazarCargas(raiz);
+  const en = $('[data-enviar-listos]', raiz); if (en) en.addEventListener('click', () => confirmarEnvio(grupos().listos.map(i => i.key)));
   contadores();
 }
 
-function enlazarHoy(raiz) {
-  $$('[data-copiar]', raiz).forEach(b => b.addEventListener('click', () => copiar(b.dataset.copiar)));
+function enlazarGeneral(raiz) {
   $$('[data-ir]', raiz).forEach(b => b.addEventListener('click', () => irA(b.dataset.ir)));
-  const z = $('[data-zona]', raiz), input = $('[data-archivo]', raiz);
-  if (z && input) {
+  $$('[data-copiar]', raiz).forEach(b => b.addEventListener('click', () => copiar(b.dataset.copiar)));
+  $$('tr[data-cuota]', raiz).forEach(f => f.addEventListener('click', () => abrirCuota(f.dataset.cuota)));
+}
+
+/* ─── Carga de reportes: una tarjeta por reporte, sin casillas ──────────── */
+function zonaHTML(tp, chica) {
+  const R = REP[tp];
+  return '<div class="zona ' + (chica ? 'chica' : '') + '" data-zona="' + tp + '" tabindex="0" role="button" aria-label="Elegir archivo del ' + R.n + '">' + ico('subir') +
+    (chica ? '<strong>Reemplazar con un archivo nuevo</strong><span>arrastra o haz clic</span>' : '<strong>Arrastra el ' + R.n + ' aquí</strong><span>o haz clic para elegir el archivo de Excel (.xlsx)</span>') +
+    '</div><input type="file" accept=".xlsx,.xls" hidden data-archivo="' + tp + '">';
+}
+function filtroAyudaHTML(tp) {
+  const v = S.estado.tanda.ventana;
+  return '<div class="filtro-ayuda">' + (tp === 'rep1'
+    ? 'Descárgalo filtrando Fecha Vencimiento del <b>' + dma(v.nominalDesde) + '</b><button class="copiar" data-copiar="' + dma(v.nominalDesde) + '">copiar</button> al <b>' + dma(v.nominalHasta) + '</b><button class="copiar" data-copiar="' + dma(v.nominalHasta) + '">copiar</button>'
+    : 'Descárgalo con <b>corte de hoy</b>, todas las líneas, en pesos y en dólares.') + '</div>';
+}
+
+function tarjetaCarga(tp) {
+  const e = S.estado, R = REP[tp], c = e.cortes[tp], st = estadoReporte(tp), it = S.carga[tp];
+  const chip = st === 'ok' ? '<span class="chip oscuro">' + ico('ok') + 'Al día</span>' : st === 'vencido' ? '<span class="chip rojo">Vencido</span>' : '<span class="chip">Sin cargar</span>';
+  const permitido = can('cargar');
+  let cuerpo;
+  if (it && (it.estado === 'leyendo' || it.estado === 'validando' || it.estado === 'guardando')) {
+    cuerpo = '<div class="carga-proceso"><span class="giro"></span>' + ({ leyendo: 'Leyendo ', validando: 'Revisando ', guardando: 'Guardando ' })[it.estado] + esc(it.archivo) + '…</div>';
+  } else if (it && it.estado === 'error') {
+    cuerpo = '<div class="carga-aviso error"><b>' + ico('error') + 'No se pudo usar ' + esc(it.archivo) + '</b><ul><li>' + esc(it.error) + '</li>' + (it.detalles || []).map(d => '<li>' + esc(d) + '</li>').join('') + '</ul><div class="acciones">' +
+      (it.otroTipo && permitido ? '<button class="btn principal chico" data-usar-como="' + it.otroTipo + '" data-desde="' + tp + '">Usarlo como ' + REP[it.otroTipo].n + '</button>' : '') + '<button class="btn chico" data-cancelar-carga="' + tp + '">Elegir otro archivo</button></div></div>';
+  } else if (it && it.estado === 'revisar') {
+    const warns = (it.val.avisos || []).filter(a => a.nivel === 'warn'), infos = (it.val.avisos || []).filter(a => a.nivel !== 'warn');
+    const chips = tp === 'rep1' && it.val.porFecha ? '<div class="fechas-chips">' + it.val.porFecha.map(f => '<span class="' + (f.fecha >= it.val.requerido.desde && f.fecha <= it.val.requerido.hasta ? 'dentro' : '') + '">' + dCorta(f.fecha) + ': ' + f.n + '</span>').join('') + '</div>' : '';
+    cuerpo = '<div class="carga-aviso"><b>' + ico('warn') + 'Revisa ' + esc(it.archivo) + ' antes de guardarlo</b><p style="margin-top:6px;font-size:14px">' + pl(it.val.filas, R.unidad[0], R.unidad[1]) + ' leídas.</p>' + chips +
+      '<ul>' + warns.map(w => '<li>' + esc(w.texto) + '</li>').join('') + infos.map(w => '<li style="color:var(--g600)">' + esc(w.texto) + '</li>').join('') + '</ul>' +
+      '<div class="acciones"><button class="btn principal" data-guardar-carga="' + tp + '">Guardar de todos modos</button><button class="btn" data-cancelar-carga="' + tp + '">Elegir otro archivo</button></div></div>';
+  } else if (c.cargado) {
+    const rango = c.rango ? c.rango.replace(/(\d{4})-(\d{2})-(\d{2})/g, (_, y, m, d) => d + '/' + m + '/' + y) : '';
+    cuerpo = '<div class="cc-datos"><div><b>' + esc(cuandoTxt(c.fechaHora)) + '</b><span>Cargado por ' + esc((c.usuario || '').split('@')[0] || 'desconocido') + '</span></div>' +
+      '<div><b>' + pl(c.filas, R.unidad[0], R.unidad[1]) + '</b><span>' + (tp === 'rep1' && rango ? 'Vencimientos ' + esc(rango.replace(' a ', ' al ')) : 'en el archivo cargado') + '</span></div></div>' +
+      (c.archivo ? '<p class="nota">Archivo: ' + esc(c.archivo) + '</p>' : '') +
+      (st === 'vencido' ? '<div class="carga-aviso"><b>' + ico('warn') + 'Ya no está al día</b><p style="font-size:14px;margin-top:4px">Tiene ' + pl(c.edad, 'día hábil', 'días hábiles') + ' y el máximo permitido es ' + c.max + '.</p></div>' : '') +
+      (st !== 'ok' ? filtroAyudaHTML(tp) : '') +
+      '<div class="cc-acciones"><button class="btn" data-ver-reporte="' + tp + '">' + icoI('ojo') + 'Ver contenido</button></div>' + (permitido ? zonaHTML(tp, true) : '');
+  } else {
+    cuerpo = (permitido ? zonaHTML(tp, false) : '<p class="nota">Tu rol no permite cargar reportes.</p>') + filtroAyudaHTML(tp);
+  }
+  return '<article class="carga-card"><div class="cc-cab"><div class="cc-sello">' + R.sello + '</div><div><h3>' + R.n + '</h3><p>' + R.sub + '</p></div>' + chip + '</div><div class="cc-cuerpo">' + cuerpo + '</div></article>';
+}
+
+function repintarCargas() {
+  $$('[data-cargas]').forEach(box => { box.innerHTML = tarjetaCarga('rep1') + tarjetaCarga('rep9'); enlazarCargas(box); enlazarGeneral(box); });
+}
+
+function enlazarCargas(raiz) {
+  $$('[data-zona]', raiz).forEach(z => {
+    const tp = z.dataset.zona, input = z.parentElement.querySelector('[data-archivo="' + tp + '"]');
     z.addEventListener('click', () => input.click());
     z.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); input.click(); } });
     z.addEventListener('dragover', ev => { ev.preventDefault(); z.classList.add('arrastre'); });
     z.addEventListener('dragleave', () => z.classList.remove('arrastre'));
-    z.addEventListener('drop', ev => { ev.preventDefault(); z.classList.remove('arrastre'); if (ev.dataTransfer.files.length) procesarArchivos(Array.from(ev.dataTransfer.files)); });
-    input.addEventListener('change', () => { if (input.files.length) procesarArchivos(Array.from(input.files)); input.value = ''; });
-  }
-  $$('[data-guardar-carga]', raiz).forEach(b => b.addEventListener('click', async () => {
-    const c = S.cargasLista.find(x => x.id === Number(b.dataset.guardarCarga)); if (!c) return;
-    await guardarCarga(c); await terminarCargas();
+    z.addEventListener('drop', ev => { ev.preventDefault(); z.classList.remove('arrastre'); if (ev.dataTransfer.files.length) procesarArchivo(tp, ev.dataTransfer.files[0]); });
+    input.addEventListener('change', () => { if (input.files.length) procesarArchivo(tp, input.files[0]); input.value = ''; });
+  });
+  $$('[data-guardar-carga]', raiz).forEach(b => b.addEventListener('click', () => guardarCarga(b.dataset.guardarCarga)));
+  $$('[data-cancelar-carga]', raiz).forEach(b => b.addEventListener('click', () => { S.carga[b.dataset.cancelarCarga] = null; repintarCargas(); }));
+  $$('[data-usar-como]', raiz).forEach(b => b.addEventListener('click', () => {
+    const desde = b.dataset.desde, nuevo = b.dataset.usarComo, it = S.carga[desde];
+    S.carga[desde] = null; procesarFilas(nuevo, it.archivo, it.rows);
   }));
-  $$('[data-cerrar-carga]', raiz).forEach(b => b.addEventListener('click', () => { S.cargasLista = S.cargasLista.filter(x => x.id !== Number(b.dataset.cerrarCarga)); pintarHoy(); }));
-  const en = $('[data-enviar-listos]', raiz); if (en) en.addEventListener('click', () => confirmarEnvio(grupos().listos.map(i => i.key)));
+  $$('[data-ver-reporte]', raiz).forEach(b => b.addEventListener('click', () => verReporte(b.dataset.verReporte)));
 }
 
-/* ─── Carga de reportes: se reconocen solos y se guardan sin preguntar ──── */
 function norm(s) { return String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
 function detectarTipo(rows) {
   for (let i = 0; i < Math.min(10, rows.length); i++) {
@@ -351,47 +415,107 @@ function parseXlsx(file) {
   });
 }
 
-async function procesarArchivos(files) {
-  for (const f of files) await procesarUno(f);
-  await terminarCargas();
-}
-
-async function procesarUno(file) {
-  const item = { id: ++S.cargaSeq, archivo: file.name, estado: 'leyendo' };
-  S.cargasLista.push(item); pintarHoy();
+async function procesarArchivo(tp, file) {
+  const it = { id: ++S.cargaSeq, archivo: file.name, estado: 'leyendo' };
+  S.carga[tp] = it; repintarCargas();
   try {
     if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error('Usa un archivo de Excel (.xlsx o .xls).');
     const rows = await parseXlsx(file);
-    const tipo = detectarTipo(rows);
-    if (!tipo) throw new Error('No reconozco este archivo. El Rep1 debe tener la columna "Fecha Vencimiento" y el Rep9 las columnas "Línea de crédito" y "*SALDO TOTAL".');
-    item.tipo = tipo; item.estado = 'validando'; pintarHoy();
-    const val = await api('validarReporte', tipo, rows, { archivo: file.name });
-    if (!val.ok) { item.estado = 'error'; item.error = val.error; item.detalles = (val.mismatches || []).slice(0, 5); }
-    else {
-      item.val = val; item.rows = rows;
-      if ((val.avisos || []).some(a => a.nivel === 'warn')) item.estado = 'revisar';
-      else await guardarCarga(item);
+    const detectado = detectarTipo(rows);
+    if (!detectado) throw new Error('No reconozco este archivo. El Rep1 debe tener la columna "Fecha Vencimiento" y el Rep9 las columnas "Línea de crédito" y "*SALDO TOTAL".');
+    if (detectado !== tp) {
+      it.estado = 'error'; it.rows = rows; it.otroTipo = detectado;
+      it.error = 'Este archivo parece ser el ' + REP[detectado].n + ', no el ' + REP[tp].n + '.';
+      repintarCargas(); return;
     }
-  } catch (err) { item.estado = 'error'; item.error = err.message || String(err); }
-  pintarHoy();
+    await procesarFilas(tp, file.name, rows);
+  } catch (err) { it.estado = 'error'; it.error = err.message || String(err); repintarCargas(); }
 }
 
-async function guardarCarga(item) {
-  item.estado = 'guardando'; pintarHoy();
-  const meta = { archivo: item.archivo };
-  if (item.tipo === 'rep1') { meta.rangoDesde = item.val.requerido.desde; meta.rangoHasta = item.val.requerido.hasta; }
-  const r = await api('guardarReporte', item.tipo, item.rows, meta);
-  if (!r.ok) { item.estado = 'error'; item.error = r.error; pintarHoy(); return; }
-  S.cargasLista = S.cargasLista.filter(x => x.id !== item.id);
-  toast((item.tipo === 'rep1' ? 'Rep1' : 'Rep9') + ' guardado: ' + pl(r.filas, item.tipo === 'rep1' ? 'cuota' : 'línea', item.tipo === 'rep1' ? 'cuotas' : 'líneas') + '.');
+async function procesarFilas(tp, archivo, rows) {
+  const it = { id: ++S.cargaSeq, archivo: archivo, rows: rows, estado: 'validando' };
+  S.carga[tp] = it; repintarCargas();
+  const val = await api('validarReporte', tp, rows, { archivo: archivo });
+  if (!val.ok) { it.estado = 'error'; it.error = val.error; it.detalles = (val.mismatches || []).slice(0, 5); repintarCargas(); return; }
+  it.val = val;
+  if ((val.avisos || []).some(a => a.nivel === 'warn')) { it.estado = 'revisar'; repintarCargas(); }
+  else await guardarCarga(tp);
 }
 
-async function terminarCargas() {
+async function guardarCarga(tp) {
+  const it = S.carga[tp]; if (!it) return;
+  it.estado = 'guardando'; repintarCargas();
+  const meta = { archivo: it.archivo };
+  if (tp === 'rep1' && it.val.requerido) { meta.rangoDesde = it.val.requerido.desde; meta.rangoHasta = it.val.requerido.hasta; }
+  const r = await api('guardarReporte', tp, it.rows, meta);
+  if (!r.ok) { it.estado = 'error'; it.error = r.error; repintarCargas(); return; }
+  S.carga[tp] = null;
+  toast(REP[tp].n + ' guardado: ' + pl(r.filas, REP[tp].unidad[0], REP[tp].unidad[1]) + '.');
+  await terminarCarga();
+}
+
+async function terminarCarga() {
   await refrescarEstado();
-  S.excl.clear(); S.cartera = null;
+  S.excl.clear(); S.cartera = null; S.hoja = null; S.saldosV = null; S.cortes = null; S.datos = null;
   if (S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado) await cargarCola(true);
   api('getResumenInicio').then(r => { S.resumen = r; if (S.vista === 'hoy') pintarHoy(); });
-  pintarHoy();
+  if (S.vista === 'hoy') pintarHoy(); else if (S.vista === 'reportes') cargarReportes(); else if (S.vista === 'hoja') cargarHoja(); else repintarCargas();
+}
+
+/* Ver el reporte tal como quedó guardado */
+async function verReporte(tp) {
+  const velo = abrirModal({ titulo: REP[tp].n + ' cargado', ancho: true, sinFoco: true, cuerpo: '<div class="cargando"><span class="giro"></span>Leyendo el reporte…</div>', pie: '' });
+  const r = await api('getReporteCargado', tp);
+  const cuerpo = $('.modal-cuerpo', velo);
+  if (!r.ok) { cuerpo.innerHTML = '<div class="vacio"><b>No se pudo abrir</b>' + esc(r.error) + '</div>'; return; }
+  const esFecha = v => /^\d{4}-\d{2}-\d{2}/.test(String(v));
+  const fmt = (v, c) => { if (v === '' || v === null) return ''; if (esFecha(v)) return dma(String(v).slice(0, 10)); if (typeof v === 'number') { const dinero = tp === 'rep1' ? (c >= 3 && c <= 7) : (c >= 6 && c <= 28 && c !== 2); return dinero ? n2(v) : String(v); } return esc(v); };
+  const pintar = q => {
+    const t = (q || '').toLowerCase();
+    const filas = r.filas.filter(f => !t || f.join(' ').toLowerCase().indexOf(t) >= 0);
+    $('#rep-cuerpo', cuerpo).innerHTML = filas.slice(0, 400).map(f => '<tr>' + f.map((v, c) => '<td class="' + (typeof v === 'number' ? 'der' : '') + '" style="white-space:nowrap">' + fmt(v, c) + '</td>').join('') + '</tr>').join('') || '<tr><td colspan="' + r.encabezados.length + '"><div class="vacio">Sin coincidencias.</div></td></tr>';
+    $('#rep-cuenta', cuerpo).textContent = filas.length > 400 ? 'Mostrando 400 de ' + filas.length + '. Usa la búsqueda o descarga el archivo.' : pl(filas.length, 'fila', 'filas');
+  };
+  cuerpo.innerHTML = '<div class="herramientas"><div><b>' + esc(r.corte.archivo || REP[tp].n) + '</b><div class="nota">Cargado ' + esc(cuandoTxt(r.corte.fechaHora)) + ' por ' + esc((r.corte.usuario || '').split('@')[0]) + '. <span id="rep-cuenta"></span></div></div>' +
+    '<div style="display:flex;gap:8px"><input class="buscar" id="rep-buscar" type="search" placeholder="Buscar en el reporte"><button class="btn" id="rep-xls">' + icoI('descarga') + 'Descargar Excel</button></div></div>' +
+    '<div class="tabla-wrap" style="max-height:60vh"><table class="tabla"><thead><tr>' + r.encabezados.map(h => '<th style="white-space:nowrap">' + esc(h) + '</th>').join('') + '</tr></thead><tbody id="rep-cuerpo"></tbody></table></div>';
+  pintar('');
+  $('#rep-buscar', cuerpo).addEventListener('input', ev => pintar(ev.target.value));
+  $('#rep-xls', cuerpo).addEventListener('click', () => descargarExcel(REP[tp].n + '_cargado_' + S.estado.tanda.hoy + '.xlsx', [{ nombre: REP[tp].n, filas: [r.encabezados].concat(r.filas.map(f => f.map(v => esFecha(v) ? dma(String(v).slice(0, 10)) : v))) }]));
+}
+
+function descargarExcel(nombre, hojas) {
+  try {
+    const wb = XLSX.utils.book_new();
+    hojas.forEach(h => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(h.filas), h.nombre));
+    XLSX.writeFile(wb, nombre);
+    toast('Archivo descargado: ' + nombre);
+  } catch (e) { toast('No se pudo generar el archivo: ' + e.message, 'error'); }
+}
+
+/* ═══════════════════════ REPORTES ══════════════════════════════════════════ */
+async function cargarReportes() {
+  const raiz = $('#v-reportes');
+  if (!S.cortes) {
+    raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Cargando…</div>';
+    S.cortes = await api('getCortes');
+  }
+  pintarReportes();
+}
+
+function pintarReportes() {
+  const raiz = $('#v-reportes'), c = S.cortes, v = S.estado.tanda.ventana;
+  const cat = c && c.ok ? c.catalogos : null;
+  raiz.innerHTML =
+    '<div class="titulo-pag"><div><h2>Reportes</h2><p class="lead">Sube el Rep1 y el Rep9 del día, cada uno en su tarjeta. Se revisan solos y se guardan en cuanto están bien. Para esta tanda, el Rep1 va de vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta) + ' y el Rep9 con corte de hoy.</p></div></div>' +
+    '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
+    '<div class="panel"><div class="panel-cab"><div><h3>Historial de cargas</h3><p>Cada archivo que se subió, quién lo hizo y cuándo</p></div></div>' +
+    (c && c.ok && c.cortes.length ? '<div class="tabla-wrap" style="border:0;border-radius:0;max-height:420px"><table class="tabla"><thead><tr><th>Reporte</th><th>Fecha y hora</th><th>Cargado por</th><th>Archivo</th><th class="der">Filas</th><th class="oculta-m">Vencimientos</th><th class="der oculta-m">Control</th></tr></thead><tbody>' +
+      c.cortes.map(x => '<tr><td><span class="chip ' + (x.reporte === 'Rep1' ? 'suave' : '') + '">' + esc(x.reporte) + '</span></td><td>' + esc(dma(fechaDe(x.fechaHora)) + ' ' + horaDe(x.fechaHora)) + '</td><td>' + esc((x.usuario || '').split('@')[0]) + '</td><td>' + esc(x.archivo || '—') + '</td><td class="der num">' + x.filas + '</td><td class="oculta-m">' + (x.vencMin ? dma(x.vencMin) + ' al ' + dma(x.vencMax) : '—') + '</td><td class="der num oculta-m">' + n2(x.control) + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="vacio"><b>Todavía no hay cargas</b>Cuando subas un reporte quedará registrado aquí.</div>') + '</div>' +
+    '<div class="panel"><div class="panel-cab"><div><h3>Catálogos</h3><p>No vienen en los reportes; se mantienen en el libro Maestro</p></div><button class="btn chico" data-ir="datos">Ver datos de clientes</button></div>' +
+    '<div class="panel-cuerpo"><div class="cc-datos"><div><b>' + (cat ? cat.tasas : '—') + '</b><span>contratos con tasa registrada</span></div><div><b>' + (cat ? cat.correos : '—') + '</b><span>contratos con correo y cuenta STP</span></div></div></div></div>';
+  enlazarGeneral(raiz); enlazarCargas(raiz);
 }
 
 /* ═══════════════════════ AVISOS ════════════════════════════════════════════ */
@@ -400,7 +524,7 @@ const MOTIVO = {
   SIN_REP9: 'No aparece en el Rep9; su saldo vencido puede estar incompleto.',
   TASA_DUPLICADA: 'Está repetida en el catálogo de tasas; se usó la primera fila.',
   CONTACTO_DUPLICADO: 'Está repetida en el catálogo de correos; se usó la primera fila.',
-  IMPORTE_NO_CUADRA: 'En el Rep1, capital más interés más IVA no suma el importe.',
+  IMPORTE_NO_CUADRA: 'En el Rep1, capital más interés más otros más IVA no suma el importe.',
   SIN_CORREO: 'No tiene correo registrado.',
   SIN_STP: 'Le falta la cuenta STP.',
   REP1_VENCIDO: 'El Rep1 ya no está al día.',
@@ -408,104 +532,82 @@ const MOTIVO = {
   MONEDA_DISTINTA: 'El Rep1 y el Rep9 traen monedas distintas.',
   AJUSTE_PENDIENTE: 'Hay un ajuste de saldo esperando aprobación.'
 };
-function motivos(i) {
-  const l = i.bloqueos.concat(i.alertas.filter(a => a.nivel === 'warn'));
-  return l.map(x => MOTIVO[x.codigo] || x.texto);
-}
-function aClave(i) { return i.bloqueos.concat(i.alertas.filter(a => a.nivel === 'warn')).map(x => x.codigo); }
-
-function coincide(i) {
-  const q = S.busqueda.trim().toLowerCase();
-  return !q || (i.linea + ' ' + i.cliente).toLowerCase().indexOf(q) >= 0;
-}
+function motivos(i) { return i.bloqueos.concat(i.alertas.filter(a => a.nivel === 'warn')).map(x => MOTIVO[x.codigo] || x.texto); }
+function codigos(i) { return i.bloqueos.concat(i.alertas.filter(a => a.nivel === 'warn')).map(x => x.codigo); }
+function coincide(i) { const q = S.busqueda.trim().toLowerCase(); return !q || (i.linea + ' ' + i.cliente).toLowerCase().indexOf(q) >= 0; }
 function quienHTML(i) { return '<div class="quien"><b title="' + esc(i.cliente) + '">' + esc(i.cliente) + '</b><small>Línea ' + esc(i.linea) + '</small></div>'; }
-function cuandoHTML(i) {
-  const aviso = i.accion === 'PREVENTIVO' ? 'Primer aviso' : i.accion === 'VISPERA' ? 'Segundo aviso' : '';
-  return '<div class="cuando">Paga ' + dCorta(i.fechaPago) + '<small>' + (aviso ? aviso : '') + (i.fechaPago !== i.fechaNominal ? (aviso ? ', ' : '') + 'vence ' + dCorta(i.fechaNominal) : '') + '</small></div>';
-}
-
-function grupoCab(icono, titulo, cuantos, extra) {
-  return '<div class="grupo-cab">' + ico(icono) + '<h3>' + titulo + '</h3><span class="cuantos">' + cuantos + '</span><span class="espacio"></span>' + (extra || '') + '</div>';
-}
+function pagaHTML(i) { return '<div class="cuando">Paga ' + dCorta(i.fechaPago) + (i.fechaPago !== i.fechaNominal ? '<small>vence ' + dCorta(i.fechaNominal) + ', día inhábil</small>' : '') + '</div>'; }
+function chipAviso(i) { return i.accion === 'PREVENTIVO' ? '<span class="chip suave">Primer aviso</span>' : i.accion === 'VISPERA' ? '<span class="chip amarillo">Segundo aviso</span>' : ''; }
+function grupoCab(icono, titulo, cuantos, extra) { return '<div class="grupo-cab">' + ico(icono) + '<h3>' + titulo + '</h3><span class="cuantos">' + cuantos + '</span><span class="espacio"></span>' + (extra || '') + '</div>'; }
+function vacioSinReportes(msg) { return '<div class="titulo-pag"><div><h2>Avisos de hoy</h2></div></div><div class="panel"><div class="vacio"><b>Todavía no hay avisos</b>' + esc(msg || 'Sube el Rep1 y el Rep9 para que la plataforma calcule los avisos de hoy.') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a subir los reportes</button></div></div></div>'; }
 
 function pintarAvisos() {
   const raiz = $('#v-avisos');
   if (!S.estado) return;
   if (!S.cola) {
-    raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Preparando los avisos…</div>';
-    if (S.estado.inicializado && S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado) cargarCola(true);
-    else raiz.innerHTML = vacioSinReportes();
+    if (S.estado.inicializado && S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado) { raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Preparando los avisos…</div>'; cargarCola(true); }
+    else { raiz.innerHTML = vacioSinReportes(); enlazarGeneral(raiz); }
     return;
   }
-  if (!S.cola.ok) { raiz.innerHTML = vacioSinReportes(S.cola.error); $('[data-ir]', raiz).addEventListener('click', () => irA('hoy')); return; }
+  if (!S.cola.ok) { raiz.innerHTML = vacioSinReportes(S.cola.error); enlazarGeneral(raiz); return; }
   const c = S.cola, g = grupos(), f = x => x.filter(coincide);
   const listos = f(g.listos), revisar = f(g.revisar), bloq = f(g.bloqueadas), luego = f(g.luego), atend = f(g.atendidas);
-  const r1 = c.frescura.rep1.corte, r9 = c.frescura.rep9.corte;
   const caducos = !c.frescura.rep1.ok || !c.frescura.rep9.ok;
   const selec = g.listos.filter(i => !S.excl.has(i.key));
+  const puedeEnviar = can('enviar');
 
-  let h = '<div class="titulo-pagina"><div><h2>Avisos de hoy</h2><p>' + dLargaAnio(c.hoy) + '. Con el Rep1 de ' + cuandoTxt(r1.fechaHora) + ' y el Rep9 de ' + cuandoTxt(r9.fechaHora) + '.</p></div>' +
-    '<input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar" style="max-width:300px"></div>';
-  if (caducos) h += '<div class="banner" style="margin:0 0 8px">' + ico('warn') + '<span>Los reportes ya no están al día, por eso no se puede enviar nada.</span><button class="btn chico" data-ir="hoy">Subir reportes</button></div>';
+  let h = '<div class="titulo-pag"><div><h2>Avisos de hoy</h2><p class="lead">Calculados con el Rep1 de ' + esc(cuandoTxt(c.frescura.rep1.corte.fechaHora)) + ' y el Rep9 de ' + esc(cuandoTxt(c.frescura.rep9.corte.fechaHora)) + '. Toca una fila para ver cómo se construyó su monto.</p></div>' +
+    '<div class="acciones-pag"><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div></div>';
+  if (caducos) h += '<div class="banner" style="margin-bottom:6px">' + ico('warn') + '<span>Los reportes ya no están al día, por eso no se puede enviar nada.</span><button class="btn chico" data-ir="reportes">Subir reportes</button></div>';
 
-  h += '<div class="grupo" style="margin-top:12px">' + grupoCab('listo', 'Listos para enviar', listos.length ? pl(g.listos.length, 'aviso', 'avisos') + ', ' + montosTxt(g.listos) : '0 avisos',
-    g.listos.length ? '<button class="btn texto chico" data-todos="' + (selec.length === g.listos.length ? 'no' : 'si') + '">' + (selec.length === g.listos.length ? 'Quitar todos' : 'Seleccionar todos') + '</button>' : '');
+  h += '<div class="grupo" style="margin-top:6px">' + grupoCab('listo', 'Listos para enviar', g.listos.length ? pl(g.listos.length, 'aviso', 'avisos') + ', ' + montosTxt(g.listos) : '0 avisos',
+    g.listos.length && puedeEnviar ? '<button class="btn texto chico" data-todos="' + (selec.length === g.listos.length ? 'no' : 'si') + '">' + (selec.length === g.listos.length ? 'Quitar todos' : 'Seleccionar todos') + '</button>' : '');
   if (listos.length) {
-    h += '<p class="grupo-nota">Están marcados todos. Quita la marca de los que no quieras enviar ahora y toca el botón de abajo.</p><div class="lista">' + listos.map(i =>
-      '<div class="fila clic" data-key="' + esc(i.key) + '" tabindex="0" role="button"><label class="elige"><input type="checkbox" class="tilde" data-sel ' + (S.excl.has(i.key) ? '' : 'checked') + (can('enviar') ? '' : ' disabled') + ' aria-label="Incluir en el envío"></label>' +
-      quienHTML(i) + cuandoHTML(i) + '<div class="monto num">' + dinero(i.total, i.moneda) + '</div><span class="flecha">' + ico('der') + '</span></div>').join('') + '</div>';
-  } else h += '<div class="lista"><div class="vacio">' + (g.listos.length ? '<b>Sin resultados</b>Prueba con otro nombre o número de línea.' : '<b>No hay avisos listos por ahora</b>' + (g.revisar.length + g.bloqueadas.length ? 'Revisa los que necesitan atención.' : 'Cuando haya cuotas por avisar aparecerán aquí.')) + '</div></div>';
+    h += '<p class="grupo-nota">Ya están marcados. Quita la marca de los que no quieras enviar ahora y usa el botón de abajo.</p><div class="tabla-wrap"><table class="tabla"><thead><tr><th class="col-tilde"></th><th>Cliente</th><th>Paga</th><th class="oculta-m">Aviso</th><th class="der">Total</th><th></th></tr></thead><tbody>' + listos.map(i =>
+      '<tr class="clic" data-key="' + esc(i.key) + '"><td class="col-tilde"><input type="checkbox" class="tilde" data-sel ' + (S.excl.has(i.key) ? '' : 'checked') + (puedeEnviar ? '' : ' disabled') + ' aria-label="Incluir ' + esc(i.cliente) + ' en el envío"></td><td>' + quienHTML(i) + '</td><td>' + pagaHTML(i) + '</td><td class="oculta-m">' + chipAviso(i) + '</td><td class="der monto num">' + dinero(i.total, i.moneda) + '</td><td class="der">' + '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>' + '</td></tr>').join('') + '</tbody></table></div>';
+  } else h += '<div class="panel"><div class="vacio">' + (g.listos.length ? '<b>Sin resultados</b>Prueba con otro nombre o número de línea.' : '<b>No hay avisos listos por ahora</b>' + (g.revisar.length + g.bloqueadas.length ? 'Revisa los que necesitan atención.' : 'Cuando haya cuotas por avisar aparecerán aquí.')) + '</div></div>';
   h += '</div>';
 
   if (revisar.length) {
-    h += '<div class="grupo">' + grupoCab('warn', 'Revisa antes de enviar', pl(revisar.length, 'aviso', 'avisos')) + '<p class="grupo-nota">Se pueden enviar, pero tienen una observación. Completa el dato o envíalos tal como están.</p><div class="lista">' +
-      revisar.map(i => '<div class="fila atencion"><button class="quien btn texto" style="text-align:left;text-decoration:none;padding:0;display:block;min-height:0" data-ficha="' + esc(i.linea) + '">' + quienHTML(i) + '</button><div class="motivo"><b>Paga ' + dCorta(i.fechaPago) + ', ' + dinero(i.total, i.moneda) + '.</b> ' + motivos(i).map(esc).join(' ') + '</div>' +
-        '<div class="botones">' + (aClave(i).some(k => k === 'SIN_TASA' || k === 'TASA_DUPLICADA' || k === 'CONTACTO_DUPLICADO') && can('catalogo') ? '<button class="btn chico" data-datos="' + esc(i.linea) + '">Completar datos</button>' : '') +
-        '<button class="btn chico" data-ver="' + esc(i.key) + '">Ver cálculo</button>' + (can('enviar') ? '<button class="btn chico principal" data-asi="' + esc(i.key) + '">Enviar así</button>' : '') + '</div></div>').join('') + '</div></div>';
+    h += '<div class="grupo">' + grupoCab('warn', 'Revisa antes de enviar', pl(revisar.length, 'aviso', 'avisos')) + '<p class="grupo-nota">Se pueden enviar, pero tienen una observación. Completa el dato o envíalos tal como están.</p><div class="tabla-wrap"><table class="tabla"><tbody>' +
+      revisar.map(i => '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + ', ' + dinero(i.total, i.moneda) + '.</b> ' + motivos(i).map(esc).join(' ') + '</td><td><div class="celda-acc">' +
+        (codigos(i).some(k => k === 'SIN_TASA' || k === 'TASA_DUPLICADA' || k === 'CONTACTO_DUPLICADO') && can('catalogo') ? '<button class="btn chico" data-datos="' + esc(i.linea) + '">Completar datos</button>' : '') +
+        '<button class="btn chico" data-ver="' + esc(i.key) + '">Ver cálculo</button>' + (puedeEnviar ? '<button class="btn chico principal" data-asi="' + esc(i.key) + '">Enviar así</button>' : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
   }
   if (bloq.length) {
-    h += '<div class="grupo">' + grupoCab('error', 'No se pueden enviar todavía', pl(bloq.length, 'aviso', 'avisos')) + '<p class="grupo-nota">Les falta algo indispensable. En cuanto lo completes pasan a la lista de arriba.</p><div class="lista">' +
+    h += '<div class="grupo">' + grupoCab('error', 'No se pueden enviar todavía', pl(bloq.length, 'aviso', 'avisos')) + '<p class="grupo-nota">Les falta algo indispensable. En cuanto lo completes pasan a la lista de arriba.</p><div class="tabla-wrap"><table class="tabla"><tbody>' +
       bloq.map(i => {
-        const k = aClave(i);
+        const k = codigos(i);
         const boton = k.some(x => x === 'SIN_CORREO' || x === 'SIN_STP') ? '<button class="btn chico principal" data-datos="' + esc(i.linea) + '">Completar datos</button>'
-          : k.some(x => x === 'REP1_VENCIDO' || x === 'REP9_VENCIDO') ? '<button class="btn chico principal" data-ir="hoy">Subir reportes</button>'
+          : k.some(x => x === 'REP1_VENCIDO' || x === 'REP9_VENCIDO') ? '<button class="btn chico principal" data-ir="reportes">Subir reportes</button>'
           : k.indexOf('AJUSTE_PENDIENTE') >= 0 ? '<button class="btn chico principal" data-ir="ajustes">Ver ajustes</button>' : '<button class="btn chico" data-ficha="' + esc(i.linea) + '">Ver cliente</button>';
-        return '<div class="fila atencion"><button class="quien btn texto" style="text-align:left;text-decoration:none;padding:0;display:block;min-height:0" data-ficha="' + esc(i.linea) + '">' + quienHTML(i) + '</button><div class="motivo"><b>Paga ' + dCorta(i.fechaPago) + '.</b> ' + motivos(i).map(esc).join(' ') + '</div><div class="botones">' + boton + '</div></div>';
-      }).join('') + '</div></div>';
+        return '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + '.</b> ' + motivos(i).map(esc).join(' ') + '</td><td><div class="celda-acc">' + boton + '</div></td></tr>';
+      }).join('') + '</tbody></table></div></div>';
   }
+  const filaSimple = (i, col2) => '<tr class="clic" data-key="' + esc(i.key) + '"><td>' + quienHTML(i) + '</td><td><div class="cuando">' + col2 + '</div></td><td class="der monto num">' + dinero(i.total, i.moneda) + '</td><td class="der">' + '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>' + '</td></tr>';
   if (luego.length) {
-    h += '<details class="plegable"><summary>' + ico('reloj') + '<h3>Más adelante</h3><span class="cuantos" style="color:var(--gris-600);font-size:14px">' + pl(luego.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="lista">' +
-      luego.map(i => '<div class="fila simple clic" data-key="' + esc(i.key) + '" tabindex="0" role="button">' + quienHTML(i) + '<div class="cuando">' + (i.estado === 'ESPERA_VISPERA' ? 'Segundo aviso el ' : 'Primer aviso el ') + dCorta(i.programadaPara) + '<small>Paga ' + dCorta(i.fechaPago) + '</small></div><div class="monto num">' + dinero(i.total, i.moneda) + '</div><span class="flecha">' + ico('der') + '</span></div>').join('') + '</div></details>';
+    h += '<details class="plegable"><summary>' + ico('reloj') + '<h3>Más adelante</h3><span class="cuantos">' + pl(luego.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="tabla-wrap"><table class="tabla"><tbody>' +
+      luego.map(i => filaSimple(i, (i.estado === 'ESPERA_VISPERA' ? 'Segundo aviso el ' : 'Primer aviso el ') + dCorta(i.programadaPara) + '<small>Paga ' + dCorta(i.fechaPago) + '</small>')).join('') + '</tbody></table></div></details>';
   }
   if (atend.length) {
-    h += '<details class="plegable"><summary>' + ico('ok') + '<h3>Ya atendidos</h3><span class="cuantos" style="color:var(--gris-600);font-size:14px">' + pl(atend.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="lista">' +
-      atend.map(i => '<div class="fila simple clic" data-key="' + esc(i.key) + '" tabindex="0" role="button">' + quienHTML(i) + '<div class="cuando">' + ({ COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' })[i.estado] + '<small>Pago ' + dCorta(i.fechaPago) + (i.nota ? ', ' + esc(i.nota) : '') + '</small></div><div class="monto num">' + dinero(i.total, i.moneda) + '</div><span class="flecha">' + ico('der') + '</span></div>').join('') + '</div></details>';
+    h += '<details class="plegable"><summary>' + ico('ok') + '<h3>Ya atendidos</h3><span class="cuantos">' + pl(atend.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="tabla-wrap"><table class="tabla"><tbody>' +
+      atend.map(i => filaSimple(i, ({ COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' })[i.estado] + '<small>Pago ' + dCorta(i.fechaPago) + (i.nota ? ', ' + esc(i.nota) : '') + '</small>')).join('') + '</tbody></table></div></details>';
   }
-  if (selec.length && can('enviar')) {
+  if (selec.length && puedeEnviar) {
     h += '<div class="barra-envio"><div class="resumen-envio">' + pl(selec.length, 'aviso seleccionado', 'avisos seleccionados') + '<small>' + esc(montosTxt(selec)) + '</small></div>' +
-      '<button class="btn principal grande" data-enviar-sel>Enviar ' + selec.length + (selec.length === 1 ? ' aviso' : ' avisos') + '</button></div>';
+      '<button class="btn principal grande" data-enviar-sel>' + icoI('enviar') + 'Enviar ' + pl(selec.length, 'aviso', 'avisos') + '</button></div>';
   }
   raiz.innerHTML = h;
   enlazarAvisos(raiz, selec);
   contadores();
 }
 
-function vacioSinReportes(msg) {
-  return '<div class="titulo-pagina"><div><h2>Avisos de hoy</h2></div></div><div class="lista"><div class="vacio"><b>Todavía no hay avisos</b>' + esc(msg || 'Sube el Rep1 y el Rep9 para que la plataforma calcule los avisos de hoy.') + '<div style="margin-top:16px"><button class="btn principal" data-ir="hoy">Ir a subir los reportes</button></div></div></div>';
-}
-
 function enlazarAvisos(raiz, selec) {
-  $$('[data-ir]', raiz).forEach(b => b.addEventListener('click', () => irA(b.dataset.ir)));
+  enlazarGeneral(raiz);
   const buscar = $('.buscar', raiz);
   if (buscar) buscar.addEventListener('input', () => { S.busqueda = buscar.value; const p = buscar.selectionStart; pintarAvisos(); const n = $('.buscar', $('#v-avisos')); n.focus(); n.setSelectionRange(p, p); });
-  $$('.fila.clic', raiz).forEach(fila => {
-    const abrir = () => abrirCuota(fila.dataset.key);
-    fila.addEventListener('click', ev => { if (ev.target.closest('label.elige')) return; abrir(); });
-    fila.addEventListener('keydown', ev => { if ((ev.key === 'Enter' || ev.key === ' ') && !ev.target.matches('input')) { ev.preventDefault(); abrir(); } });
-  });
-  $$('[data-sel]', raiz).forEach(ch => ch.addEventListener('change', () => {
-    const k = ch.closest('.fila').dataset.key; ch.checked ? S.excl.delete(k) : S.excl.add(k); pintarAvisos();
-  }));
+  $$('tr.clic', raiz).forEach(fila => fila.addEventListener('click', ev => { if (ev.target.closest('.col-tilde')) return; abrirCuota(fila.dataset.key); }));
+  $$('[data-sel]', raiz).forEach(ch => ch.addEventListener('change', () => { const k = ch.closest('tr').dataset.key; ch.checked ? S.excl.delete(k) : S.excl.add(k); pintarAvisos(); }));
   const t = $('[data-todos]', raiz);
   if (t) t.addEventListener('click', () => { const g = grupos().listos; if (t.dataset.todos === 'si') S.excl.clear(); else g.forEach(i => S.excl.add(i.key)); pintarAvisos(); });
   $$('[data-ficha]', raiz).forEach(b => b.addEventListener('click', () => abrirCliente(b.dataset.ficha)));
@@ -515,21 +617,57 @@ function enlazarAvisos(raiz, selec) {
   const en = $('[data-enviar-sel]', raiz); if (en) en.addEventListener('click', () => confirmarEnvio(selec.map(i => i.key)));
 }
 
-/* ─── Panel de un aviso ────────────────────────────────────────────────── */
-function desgloseHTML(i) {
-  const d = i.desglose, m = i.moneda;
-  const f = (t, v, cls) => (v || cls === 'suma' || cls === 'total') ? '<tr class="' + (cls || '') + '"><td>' + t + '</td><td class="num">' + dinero(v, m) + '</td></tr>' : '';
-  const tasa = i.tasaMoratoria ? (i.tasaMoratoria * 100).toFixed(2).replace(/\.?0+$/, '') + '% anual' : 'sin tasa';
-  const nota = d.moratoriosProy
-    ? 'Los moratorios proyectados son el capital vencido por la tasa moratoria (' + tasa + ', el doble de la del contrato), entre 360, por ' + pl(i.diasProy, 'día', 'días') + ' desde el corte del Rep9 hasta el vencimiento.'
-    : (d.capVencido ? 'Hay capital vencido, pero no se proyectan moratorios: ' + (i.sinTasa ? 'falta registrar la tasa del cliente.' : 'el vencimiento es el mismo día del corte.') : 'No hay capital vencido, así que no se proyectan moratorios.');
-  return '<table class="cuentas"><tbody>' + f('Capital', d.capital, 'sutil') + f('Intereses', d.intereses, 'sutil') + f('Otros cargos', d.otros, 'sutil') + f('IVA', d.iva, 'sutil') + f('Cuota del Rep1', d.cuota, 'suma') +
-    f('Capital vencido', d.capVencido) + f('Intereses vencidos con IVA', d.intVencidos) + f('Moratorios acumulados con IVA', d.moratoriosAcum) + f('Moratorios proyectados', d.moratoriosProy) + f('Ajustes de saldo', d.ajustes) +
-    f('Total a pagar', d.total, 'total') + '</tbody></table><p class="explica">' + esc(nota) + '</p>';
+/* ─── La cinta: cómo se construyó un monto, con su fuente ──────────────── */
+function cintaHTML(i) {
+  const t = i.traza, d = i.desglose, m = i.moneda;
+  let k = 0;
+  const lin = (op, nom, fuente, formula, imp, o) => {
+    o = o || {};
+    return '<div class="cinta-lin ' + (o.cero ? 'cero ' : '') + (o.sub ? 'sub' : '') + '" style="--i:' + (k++) + '"><span class="op">' + op + '</span><span class="txt"><span class="nom">' + nom + '</span>' +
+      (fuente ? '<span class="fuente ' + (o.cal ? 'cal' : '') + '">' + fuente + '</span>' : '') + (formula ? '<span class="formula">' + formula + '</span>' : '') + '</span><span class="pts"></span><span class="imp num">' + n2(imp) + '</span></div>';
+  };
+  const sec = txt => '<div class="cinta-sec">' + txt + '</div>';
+  let h = '<div class="cinta-enc"><b>Línea ' + esc(i.linea) + '</b><span>Vence el ' + dLarga(i.fechaNominal) + (i.fechaPago !== i.fechaNominal ? ' y se cobra el ' + dLarga(i.fechaPago) : '') + '</span></div>';
+
+  h += sec('Cuota del Rep1') +
+    lin('', 'Capital', 'Rep1 col. D', '', t.rep1.capital) + lin('+', 'Interés', 'Rep1 col. E', '', t.rep1.intereses) + lin('+', 'Otros', 'Rep1 col. F', '', t.rep1.otros) + lin('+', 'IVA', 'Rep1 col. G', '', t.rep1.iva) +
+    lin('=', 'Cuota', 'D + E + F + G', (Math.abs(d.cuota - t.rep1.importe) <= 0.01 ? 'Coincide con el Importe del Rep1 (col. H).' : '<b style="color:var(--ladrillo)">No coincide con el Importe del Rep1 (col. H): ' + n2(t.rep1.importe) + '.</b>'), d.cuota, { sub: true });
+
+  h += sec('Saldo vencido de la línea en el Rep9');
+  if (!t.rep9) h += lin('', 'La línea no aparece en el Rep9', '', 'No se pudo sumar saldo vencido.', 0, { cero: true });
+  else if (!t.aplicaVencido) h += lin('', 'Ya va en la primera cuota de esta línea', '', 'El saldo vencido se cobra una sola vez.', 0, { cero: true });
+  else {
+    const r = t.rep9;
+    h += lin('+', 'Capital vencido', 'Rep9 col. K', '', d.capVencido, { cero: !d.capVencido }) +
+      lin('+', 'Intereses vencidos con IVA', 'Rep9 col. P y Q', 'P ' + n2(r.intVencido) + ' + Q ' + n2(r.ivaIntVencido), d.intVencidos, { cero: !d.intVencidos }) +
+      lin('+', 'Moratorios acumulados con IVA', 'Rep9 col. R, S, T y U', 'R ' + n2(r.moratorios) + ' + S ' + n2(r.ivaMoratorios) + ' + T ' + n2(r.morCont) + ' + U ' + n2(r.ivaMorCont), d.moratoriosAcum, { cero: !d.moratoriosAcum });
+  }
+
+  let formula = '';
+  if (d.moratoriosProy > 0) formula = n2(d.capVencido) + ' × ' + pct(i.tasaMoratoria) + ' ÷ ' + t.baseDias + ' × ' + i.diasProy + (i.diasProy === 1 ? ' día' : ' días');
+  else if (!t.aplicaVencido || d.capVencido <= 0) formula = 'No hay capital vencido, así que no se proyectan moratorios.';
+  else if (!t.tasaEnCatalogo) formula = 'Falta la tasa del cliente en el catálogo, por eso queda en cero.';
+  else if (t.diasCrudos <= 0) formula = 'El vencimiento no es posterior al corte del Rep9: no hay días que proyectar.';
+  h += sec('Moratorios del periodo') + lin('+', 'Moratorios proyectados', 'calculado', formula, d.moratoriosProy, { cal: true, cero: !d.moratoriosProy });
+
+  if (i.ajustes && i.ajustes.length) {
+    h += sec('Ajustes de saldo') + i.ajustes.map(a => lin('+', esc(({ PAGO_APLICADO: 'Pago que llegó', DISPOSICION: 'Disposición', CORRECCION: 'Corrección' })[a.tipo] || a.tipo), 'registrado en la plataforma', esc(a.motivo), a.monto)).join('');
+  }
+  h += '<div class="cinta-total" style="--i:' + (k++) + '"><span class="nom">Total a pagar</span><span class="imp num">' + dinero(d.total, m).replace(/^(-?)([^0-9-]+)/, '$1$2') + '<small>' + m + '</small></span></div>';
+
+  let nota = '';
+  if (d.capVencido > 0 && t.aplicaVencido) {
+    nota = '<b>Tasa moratoria</b> = tasa del contrato ' + (t.tasaEnCatalogo ? pct(t.tasaContrato) : '(sin registrar)') + ' × ' + t.factor + ' = ' + pct(i.tasaMoratoria) + '. <b>Días</b> = del corte del Rep9 (' + dma(t.corte9) + ') al ' + (t.base === 'EFECTIVA' ? 'día de pago' : 'vencimiento original') + ' (' + dma(t.fechaBase) + ').';
+  }
+  return '<div class="cinta-fondo"><div class="cinta">' + h + '</div></div>' + (nota ? '<p class="cinta-nota">' + nota + '</p>' : '') +
+    '<p class="cinta-nota">Este es el monto que lleva el correo del aviso.</p>';
 }
 
+/* ─── Panel de un aviso ────────────────────────────────────────────────── */
 async function abrirCuota(key) {
-  const i = S.cola && S.cola.ok ? S.cola.items.find(x => x.key === key) : null; if (!i) return;
+  if (!S.cola || !S.cola.ok) await cargarCola(true);
+  const i = S.cola && S.cola.ok ? S.cola.items.find(x => x.key === key) : null;
+  if (!i) { toast('Esa cuota ya no está en los reportes cargados.', 'error'); return; }
   const velo = abrirLateral(i.cliente, 'Línea ' + i.linea);
   const cuerpo = $('.lateral-cuerpo', velo), pie = $('.lateral-pie', velo);
   const estadoTxt = { LISTA: 'Lista para enviar', REVISAR: 'Se puede enviar, con observaciones', BLOQUEADA: 'No se puede enviar todavía', PROGRAMADA: 'Su primer aviso sale el ' + (i.programadaPara ? dLarga(i.programadaPara) : ''), ESPERA_VISPERA: 'Su segundo aviso sale el ' + (i.programadaPara ? dLarga(i.programadaPara) : ''), COMPLETA: 'Sus avisos ya salieron', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' }[i.estado];
@@ -541,23 +679,23 @@ async function abrirCuota(key) {
   const avs = i.bloqueos.map(b => ico('error') + '<span>' + esc(MOTIVO[b.codigo] || b.texto) + '</span>')
     .concat(i.alertas.filter(a => a.nivel === 'warn').map(a => ico('warn') + '<span>' + esc(MOTIVO[a.codigo] || a.texto) + '</span>'))
     .concat(i.alertas.filter(a => a.nivel !== 'warn').map(a => ico('info') + '<span>' + esc(a.texto) + '</span>'))
-    .concat(hist.map(t => ico('info') + '<span>' + esc(t) + '</span>'))
-    .concat(i.ajustes.map(a => ico('info') + '<span>Ajuste de ' + dinero(a.monto, i.moneda) + ': ' + esc(a.motivo) + '.</span>'));
+    .concat(hist.map(x => ico('info') + '<span>' + esc(x) + '</span>'));
   cuerpo.innerHTML =
-    '<div class="bloque"><div class="grande-num num">' + dinero(i.total, i.moneda) + '<small>' + i.moneda + '</small></div><p style="margin-top:6px">Paga el <b>' + dLarga(i.fechaPago) + '</b>' + (i.fechaPago !== i.fechaNominal ? ' (vence el ' + dCorta(i.fechaNominal) + ', un día inhábil)' : '') + '.</p><p style="color:var(--gris-600);margin-top:2px">' + esc(estadoTxt) + '</p></div>' +
+    '<div class="bloque"><div class="grande-num num">' + dinero(i.total, i.moneda) + '<small>' + i.moneda + '</small></div><p style="margin-top:8px">Paga el <b>' + dLarga(i.fechaPago) + '</b>.</p><p style="margin-top:8px">' + chipAviso(i) + ' <span style="color:var(--g600);font-size:14px">' + esc(estadoTxt) + '</span></p></div>' +
     (avs.length ? '<div class="bloque"><h3>Qué hay que saber</h3><ul class="avisos-lista">' + avs.map(x => '<li>' + x + '</li>').join('') + '</ul></div>' : '') +
-    '<div class="bloque"><h3>Cómo se calculó</h3>' + desgloseHTML(i) + '</div>' +
-    '<div class="bloque"><h3>Correo</h3><div id="ap-correo"><button class="btn" data-ver-correo>Ver el correo tal como llegará</button></div></div>';
+    '<div class="bloque"><h3>Cómo se construyó este monto</h3>' + cintaHTML(i) + '</div>' +
+    '<div class="bloque"><h3>Correo</h3><div id="ap-correo"><button class="btn" data-ver-correo>' + icoI('ojo') + 'Ver el correo tal como llegará</button></div></div>';
   const puedeEnviar = can('enviar') && i.accion && i.estado !== 'BLOQUEADA';
   pie.classList.remove('oculto');
-  pie.innerHTML = '<button class="btn" data-cliente>Ver cliente</button>' + (can('ajustar') ? '<button class="btn" data-ajustar>Ajustar saldo</button>' : '') +
-    (can('enviar') && (i.previo || i.vispera) && i.bloqueos.length === 0 && i.diasHabiles >= 0 ? '<button class="btn" data-reenviar>Reenviar</button>' : '') + (puedeEnviar ? '<button class="btn principal" data-enviar>Enviar ahora</button>' : '');
+  pie.innerHTML = '<button class="btn" data-cliente>Ver cliente</button><button class="btn" data-hoja>Ver en la hoja de trabajo</button>' + (can('ajustar') ? '<button class="btn" data-ajustar>Ajustar saldo</button>' : '') +
+    (can('enviar') && (i.previo || i.vispera) && i.bloqueos.length === 0 && i.diasHabiles >= 0 ? '<button class="btn" data-reenviar>Reenviar</button>' : '') + (puedeEnviar ? '<button class="btn principal" data-enviar>' + icoI('enviar') + 'Enviar ahora</button>' : '');
   $('[data-cliente]', pie).addEventListener('click', () => abrirCliente(i.linea));
-  const aj = $('[data-ajustar]', pie); if (aj) aj.addEventListener('click', () => { irA('ajustes'); setTimeout(() => { const l = $('#aj-linea'); if (l) { l.value = i.linea; l.dispatchEvent(new Event('input')); $('#aj-venc').value = i.fechaNominal; $('#aj-monto').focus(); } }, 400); });
+  $('[data-hoja]', pie).addEventListener('click', () => { S.resaltar = i.key; S.hojaTab = 'hoja'; S.hojaBusqueda = i.linea; irA('hoja'); });
+  const aj = $('[data-ajustar]', pie); if (aj) aj.addEventListener('click', () => { irA('ajustes'); setTimeout(() => { const l = $('#aj-linea'); if (l) { l.value = i.linea; l.dispatchEvent(new Event('input')); $('#aj-venc').value = i.fechaNominal; $('#aj-monto').focus(); } }, 500); });
   const re = $('[data-reenviar]', pie); if (re) re.addEventListener('click', () => abrirReenvio(i.key));
   const en = $('[data-enviar]', pie); if (en) en.addEventListener('click', () => confirmarEnvio([i.key]));
   $('[data-ver-correo]', cuerpo).addEventListener('click', async () => {
-    const dest = $('#ap-correo', cuerpo); dest.innerHTML = '<div class="cargando"><span class="giro"></span>Armando el correo…</div>';
+    const dest = $('#ap-correo', cuerpo); dest.innerHTML = '<div class="cargando" style="padding:24px"><span class="giro"></span>Armando el correo…</div>';
     const p = await api('previsualizarAviso', key);
     if (!p.ok) { dest.innerHTML = '<p>' + esc(p.error) + '</p>'; return; }
     dest.innerHTML = '<dl class="meta-correo"><dt>Asunto</dt><dd>' + esc(p.asunto) + '</dd><dt>Para</dt><dd>' + esc((p.para || []).join(', ') || 'Sin correo registrado') + '</dd>' + (p.cc ? '<dt>Con copia</dt><dd>' + esc(p.cc) + '</dd>' : '') +
@@ -573,17 +711,16 @@ function confirmarEnvio(keys) {
   const rev = items.filter(i => i.estado === 'REVISAR');
   const a1 = items.filter(i => i.accion === 'PREVENTIVO').length, a2 = items.filter(i => i.accion === 'VISPERA').length;
   const partes = [a1 ? pl(a1, 'primer aviso', 'primeros avisos') : '', a2 ? pl(a2, 'segundo aviso', 'segundos avisos') : ''].filter(Boolean).join(' y ');
-  const prueba = S.estado.modoPrueba;
   const velo = abrirModal({
     titulo: items.length === 1 ? 'Enviar este aviso' : 'Enviar ' + items.length + ' avisos',
     cuerpo: '<p>' + partes + ', por <b class="num">' + esc(montosTxt(items)) + '</b>.</p>' +
-      '<p style="margin-top:8px;color:var(--gris-600)">' + (prueba ? 'Estás en modo prueba: los correos llegan a un buzón interno, no a los clientes.' : 'Los correos saldrán a los clientes y a la copia fija configurada.') + '</p>' +
+      '<p style="margin-top:8px;color:var(--g600)">' + (S.estado.modoPrueba ? 'Estás en modo prueba: los correos llegan a un buzón interno, no a los clientes.' : 'Los correos saldrán a los clientes y a la copia fija configurada.') + '</p>' +
       (rev.length ? '<div class="banner" style="margin:14px 0 0">' + ico('warn') + '<span>' + (rev.length === 1 ? 'Este aviso tiene una observación: ' : rev.length + ' avisos tienen observaciones: ') + esc(motivos(rev[0]).join(' ')) + (rev.length > 1 ? ' Y otras similares.' : '') + ' Se enviarán así.</span></div>' : '') +
       '<ul class="resumen-lista">' + items.slice(0, 8).map(i => '<li><span>' + esc(i.cliente) + '</span><span class="num">' + dinero(i.total, i.moneda) + '</span></li>').join('') + (items.length > 8 ? '<li><span>y ' + (items.length - 8) + ' más</span><span></span></li>' : '') + '</ul>',
-    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal grande" data-ir>Enviar ' + (items.length === 1 ? 'aviso' : items.length + ' avisos') + '</button>'
+    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal grande" data-ir-envio>' + icoI('enviar') + 'Enviar ' + (items.length === 1 ? 'aviso' : items.length + ' avisos') + '</button>'
   });
   $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
-  $('[data-ir]', velo).addEventListener('click', () => enviarLote(keys, rev.length > 0));
+  $('[data-ir-envio]', velo).addEventListener('click', () => enviarLote(keys, rev.length > 0));
 }
 
 async function enviarLote(keys, confirmarRevision) {
@@ -602,9 +739,7 @@ async function enviarLote(keys, confirmarRevision) {
     $('#env-barra', velo).style.width = (Math.min(i + TAM, total) / total * 100) + '%';
   }
   cerrarLateral();
-  if (S.estado.chatConfigurado && acum.enviados + acum.errores > 0) {
-    const g = grupos(); api('resumenEnChat', acum, g.revisar.length + g.bloqueadas.length);
-  }
+  if (S.estado.chatConfigurado && acum.enviados + acum.errores > 0) { const g = grupos(); api('resumenEnChat', acum, g.revisar.length + g.bloqueadas.length); }
   await cargarCola(true);
   api('getResumenInicio').then(r => { S.resumen = r; });
   const problemas = acum.resultados.filter(x => !x.ok);
@@ -625,13 +760,13 @@ function abrirReenvio(key) {
   const velo = abrirModal({
     titulo: 'Reenviar aviso',
     cuerpo: '<p>Se vuelve a mandar el aviso de <b>' + esc(i.cliente) + '</b> con el monto de hoy (' + dinero(i.total, i.moneda) + '). No cambia el calendario de avisos.</p><div class="campo" style="margin-top:14px"><label for="motivo-re">¿Por qué lo reenvías?</label><textarea id="motivo-re" placeholder="Por ejemplo: el cliente pidió el correo otra vez o cambió su dirección."></textarea></div>',
-    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal" data-ir>Reenviar</button>'
+    pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn principal" data-ir-envio>Reenviar</button>'
   });
   $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
-  $('[data-ir]', velo).addEventListener('click', async () => {
+  $('[data-ir-envio]', velo).addEventListener('click', async () => {
     const motivo = $('#motivo-re', velo).value.trim();
     if (motivo.length < 5) { toast('Cuéntanos en pocas palabras por qué lo reenvías.', 'error'); return; }
-    $('[data-ir]', velo).disabled = true;
+    $('[data-ir-envio]', velo).disabled = true;
     const r = await api('reenviarAviso', key, motivo);
     cerrarModal();
     if (r.ok && r.enviados === 1) toast('Aviso reenviado.'); else toast((r.resultados && r.resultados[0] && r.resultados[0].error) || r.error || 'No se pudo reenviar.', 'error');
@@ -639,21 +774,185 @@ function abrirReenvio(key) {
   });
 }
 
+/* ═══════════════════════ HOJA DE TRABAJO ═══════════════════════════════════ */
+/* Réplica de la hoja de cálculo de la v1: una fila por cuota del Rep1, con las
+   columnas calculadas a partir del Rep9. Tocar una fila abre "la cinta". */
+const HOJA_COLS = [
+  ['A', 'Vencimiento', f => dma(f.fechaNominal), 's1', false],
+  ['B', 'Línea', f => esc(f.linea), 's2', false],
+  ['C', 'Cliente', f => esc(f.cliente), 's3', false],
+  ['D', 'Capital', f => n2(f.capital), 'm', false, 'capital'],
+  ['E', 'Intereses', f => n2(f.intereses), 'm', false, 'intereses'],
+  ['F', 'Otros', f => n2(f.otros), 'm', false, 'otros'],
+  ['G', 'IVA', f => n2(f.iva), 'm', false, 'iva'],
+  ['H', 'Importe del Rep1', f => n2(f.importeRep1), 'm', false, 'importeRep1'],
+  ['I', 'Moneda', f => f.moneda, 'c', false],
+  ['J', 'Capital vencido', f => n2(f.capVencido), 'm', true, 'capVencido'],
+  ['K', 'Intereses vencidos', f => n2(f.intVencidos), 'm', true, 'intVencidos'],
+  ['L', 'Moratorios acumulados', f => n2(f.sumaMoratorios), 'm', true, 'sumaMoratorios'],
+  ['M', 'Moratorios del periodo', f => n2(f.moratoriosPeriodo), 'm', true, 'moratoriosPeriodo'],
+  ['N', 'Días', f => String(f.dias), 'c', true],
+  ['O', 'Tasa moratoria', f => f.tasaMoratoria ? pct(f.tasaMoratoria) : '—', 'c', true],
+  ['P', 'Ajustes', f => n2(f.ajustes), 'm', false, 'ajustes'],
+  ['Q', 'Total a pagar', f => n2(f.total), 'm', true, 'total']
+];
+const SALDOS_COLS = [
+  ['Línea', f => esc(f.linea), 's', false], ['Cliente', f => esc(f.cliente), 's', false], ['Moneda', f => f.moneda, 'c', false],
+  ['Capital vigente', f => n2(f.capVigente), 'm', false, 'capVigente'], ['Capital vencido', f => n2(f.capVencido), 'm', false, 'capVencido'],
+  ['Interés vencido', f => n2(f.intVencido), 'm', false, 'intVencido'], ['IVA interés vencido', f => n2(f.ivaIntVencido), 'm', false, 'ivaIntVencido'],
+  ['Moratorios', f => n2(f.moratorios), 'm', false, 'moratorios'], ['IVA moratorios', f => n2(f.ivaMoratorios), 'm', false, 'ivaMoratorios'],
+  ['Moratorios contingentes', f => n2(f.morCont), 'm', false, 'morCont'], ['IVA mor. contingentes', f => n2(f.ivaMorCont), 'm', false, 'ivaMorCont'],
+  ['Intereses vencidos con IVA', f => n2(f.interesesVencidos), 'm', true, 'interesesVencidos'], ['Moratorios con IVA', f => n2(f.sumaMoratorios), 'm', true, 'sumaMoratorios'],
+  ['Saldo vencido', f => n2(f.saldoVencido), 'm', false, 'saldoVencido'], ['Saldo total', f => n2(f.saldoTotal), 'm', false, 'saldoTotal']
+];
+
+async function cargarHoja() {
+  const raiz = $('#v-hoja');
+  if (!(S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado)) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2></div></div><div class="panel"><div class="vacio"><b>Falta cargar los reportes</b>La hoja se arma con el Rep1 y el Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a Reportes</button></div></div></div>'; enlazarGeneral(raiz); return; }
+  if (S.hojaTab === 'saldos') {
+    if (!S.saldosV) { raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Armando la hoja…</div>'; S.saldosV = await api('getSaldosVencidos'); }
+  } else if (!S.hoja) { raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Armando la hoja…</div>'; S.hoja = await api('getHojaTrabajo'); }
+  pintarHoja();
+}
+
+function sumaCol(filas, k) { return Math.round(filas.reduce((a, f) => a + (Number(f[k]) || 0), 0) * 100) / 100; }
+
+function pintarHoja() {
+  const raiz = $('#v-hoja'), tab = S.hojaTab;
+  const cab = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2><p class="lead">Aquí se ve cómo se construye cada monto: la cuota sale del Rep1, el saldo vencido del Rep9 y las columnas amarillas se calculan. Toca una fila para ver su cinta paso a paso.</p></div></div>' +
+    '<div class="pestanas" role="tablist">' + [['hoja', 'Cuotas del Rep1'], ['saldos', 'Saldos vencidos del Rep9'], ['formulas', 'Cómo se calcula']].map(t => '<button role="tab" aria-selected="' + (tab === t[0]) + '" data-tab="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
+  let cuerpo = '';
+  if (tab === 'hoja') cuerpo = hojaCuotasHTML();
+  else if (tab === 'saldos') cuerpo = hojaSaldosHTML();
+  else cuerpo = hojaFormulasHTML();
+  raiz.innerHTML = cab + cuerpo;
+  $$('[data-tab]', raiz).forEach(b => b.addEventListener('click', () => { S.hojaTab = b.dataset.tab; S.hojaBusqueda = ''; S.hojaFiltro = 'todos'; cargarHoja(); }));
+  enlazarGeneral(raiz);
+  const buscar = $('.buscar', raiz);
+  if (buscar) buscar.addEventListener('input', () => { S.hojaBusqueda = buscar.value; const p = buscar.selectionStart; pintarHoja(); const n = $('.buscar', $('#v-hoja')); n.focus(); n.setSelectionRange(p, p); });
+  $$('[data-hf]', raiz).forEach(b => b.addEventListener('click', () => { S.hojaFiltro = b.dataset.hf; pintarHoja(); }));
+  $$('[data-hm]', raiz).forEach(b => b.addEventListener('click', () => { S.hojaMoneda = b.dataset.hm; pintarHoja(); }));
+  $$('tr[data-key]', raiz).forEach(f => f.addEventListener('click', () => abrirCuota(f.dataset.key)));
+  $$('tr[data-linea]', raiz).forEach(f => f.addEventListener('click', () => abrirCliente(f.dataset.linea)));
+  const xl = $('[data-xls]', raiz); if (xl) xl.addEventListener('click', exportarHoja);
+  const r = $('tr.resaltada', raiz); if (r) { r.scrollIntoView({ block: 'center' }); S.resaltar = null; }
+}
+
+function monedaActiva(monedas) {
+  if (monedas.length <= 1) return monedas[0] || '';
+  return monedas.indexOf(S.hojaMoneda) >= 0 ? S.hojaMoneda : (monedas.indexOf('MXN') >= 0 ? 'MXN' : monedas[0]);
+}
+function pildorasMoneda(monedas, activa) {
+  if (monedas.length <= 1) return '';
+  return '<div class="pildoras">' + monedas.map(m => '<button aria-pressed="' + (m === activa) + '" data-hm="' + m + '">' + m + '</button>').join('') + '</div>';
+}
+
+function hojaCuotasHTML() {
+  const h = S.hoja;
+  if (!h || !h.ok) return '<div class="panel"><div class="vacio"><b>No se pudo armar la hoja</b>' + esc(h && h.error) + '</div></div>';
+  const monedas = Object.keys(h.totales).sort(), mon = monedaActiva(monedas), q = S.hojaBusqueda.trim().toLowerCase();
+  const base = h.filas.filter(f => f.moneda === mon && (!q || (f.linea + ' ' + f.cliente).toLowerCase().indexOf(q) >= 0));
+  const F = {
+    todos: ['Todas', () => true], venc: ['Con saldo vencido', f => f.capVencido > 0.005 || f.intVencidos > 0.005 || f.sumaMoratorios > 0.005],
+    mor: ['Con moratorios del periodo', f => f.moratoriosPeriodo > 0.005], obs: ['Con observaciones', f => f.estado === 'REVISAR' || f.estado === 'BLOQUEADA' || !f.cuadra]
+  };
+  if (!F[S.hojaFiltro]) S.hojaFiltro = 'todos';
+  const filas = base.filter(F[S.hojaFiltro][1]);
+  const tot = {}; HOJA_COLS.forEach(c => { if (c[5]) tot[c[5]] = sumaCol(filas, c[5]); });
+  const encabezado = '<thead><tr class="letras"><th class="s0"></th>' + HOJA_COLS.map((c, i) => '<th class="' + (c[3].charAt(0) === 's' ? c[3] : '') + '">' + c[0] + '</th>').join('') + '</tr>' +
+    '<tr class="titulos"><th class="s0"></th>' + HOJA_COLS.map(c => '<th class="' + (c[4] ? 'calc ' : '') + (c[3].charAt(0) === 's' ? c[3] : '') + '">' + c[1] + '</th>').join('') + '</tr></thead>';
+  const MAX = 600;
+  const cuerpo = filas.slice(0, MAX).map((f, n) => '<tr class="clic ' + (S.resaltar === f.key ? 'resaltada' : '') + '" data-key="' + esc(f.key) + '"><td class="rn s0">' + (n + 1) + '</td>' +
+    HOJA_COLS.map(c => {
+      const cls = (c[3].charAt(0) === 's' ? c[3] + ' ' : '') + (c[3] === 'm' ? 'der num ' : c[3] === 'c' ? 'centro ' : '') + (c[0] === 'Q' ? 'total ' : '') + (c[3] === 'm' && c[5] && !f[c[5]] ? 'cero ' : '');
+      return '<td class="' + cls + '">' + c[2](f) + '</td>';
+    }).join('') + '</tr>').join('');
+  const pie = '<tfoot><tr><td class="s0"></td><td class="s1">Total</td><td class="s2"></td><td class="s3">' + pl(filas.length, 'cuota', 'cuotas') + ' en ' + mon + '</td>' +
+    HOJA_COLS.slice(3).map(c => '<td class="' + (c[3] === 'm' ? 'der num' : '') + '">' + (c[5] ? n2(tot[c[5]]) : '') + '</td>').join('') + '</tr></tfoot>';
+  const cuadre = h.filas.filter(f => !f.cuadra).length;
+  return '<div class="herramientas"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' + pildorasMoneda(monedas, mon) +
+    '<div class="pildoras">' + Object.keys(F).map(k => '<button aria-pressed="' + (S.hojaFiltro === k) + '" data-hf="' + k + '">' + F[k][0] + '<b>' + base.filter(F[k][1]).length + '</b></button>').join('') + '</div></div>' +
+    '<div style="display:flex;gap:8px"><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.hojaBusqueda) + '" aria-label="Buscar"><button class="btn" data-xls>' + icoI('descarga') + 'Descargar Excel</button></div></div>' +
+    '<p class="nota" style="margin:-4px 0 10px">Rep1 del ' + esc(cuandoTxt(h.corte1.fechaHora)) + ' y Rep9 del ' + esc(cuandoTxt(h.corte9.fechaHora)) + '. Las columnas amarillas se calculan con el Rep9; la tasa moratoria es la del contrato por ' + h.factor + ', sobre ' + h.baseDias + ' días, hasta el ' + (h.base === 'EFECTIVA' ? 'día de pago' : 'vencimiento original') + '.' + (cuadre ? ' <b style="color:var(--ladrillo)">' + pl(cuadre, 'cuota no coincide', 'cuotas no coinciden') + ' con el Importe del Rep1.</b>' : '') + '</p>' +
+    '<div class="tabla-wrap hoja-wrap"><table class="tabla hoja">' + encabezado + '<tbody>' + (cuerpo || '<tr><td colspan="' + (HOJA_COLS.length + 1) + '"><div class="vacio">Sin resultados.</div></td></tr>') + '</tbody>' + (filas.length ? pie : '') + '</table></div>' +
+    (filas.length > MAX ? '<p class="nota" style="margin-top:8px">Se muestran las primeras ' + MAX + ' filas. Usa la búsqueda o descarga el Excel completo.</p>' : '');
+}
+
+function hojaSaldosHTML() {
+  const h = S.saldosV;
+  if (!h || !h.ok) return '<div class="panel"><div class="vacio"><b>No se pudo armar la hoja</b>' + esc(h && h.error) + '</div></div>';
+  const monedas = Object.keys(h.totales).sort(), mon = monedaActiva(monedas), q = S.hojaBusqueda.trim().toLowerCase();
+  const F = { todos: ['Todas', () => true], venc: ['Con saldo vencido', f => f.saldoVencido > 0.005 || f.capVencido > 0.005] };
+  if (!F[S.hojaFiltro]) S.hojaFiltro = 'todos';
+  const base = h.filas.filter(f => f.moneda === mon && (!q || (f.linea + ' ' + f.cliente).toLowerCase().indexOf(q) >= 0));
+  const filas = base.filter(F[S.hojaFiltro][1]);
+  const MAX = 600;
+  const encabezado = '<thead><tr class="titulos"><th class="s0"></th>' + SALDOS_COLS.map((c, i) => '<th class="' + (c[3] ? 'calc ' : '') + (i === 0 ? 's1' : i === 1 ? 's3' : '') + '">' + c[0] + '</th>').join('') + '</tr></thead>';
+  const cuerpo = filas.slice(0, MAX).map((f, n) => '<tr class="clic" data-linea="' + esc(f.linea) + '"><td class="rn s0">' + (n + 1) + '</td>' + SALDOS_COLS.map((c, i) => '<td class="' + (i === 0 ? 's1 ' : i === 1 ? 's3 ' : '') + (c[2] === 'm' ? 'der num ' : c[2] === 'c' ? 'centro ' : '') + (c[2] === 'm' && c[4] && !f[c[4]] ? 'cero' : '') + '">' + c[1](f) + '</td>').join('') + '</tr>').join('');
+  const pie = '<tfoot><tr><td class="s0"></td><td class="s1">Total</td><td class="s3">' + pl(filas.length, 'línea', 'líneas') + ' en ' + mon + '</td>' + SALDOS_COLS.slice(2).map(c => '<td class="' + (c[2] === 'm' ? 'der num' : '') + '">' + (c[4] ? n2(sumaCol(filas, c[4])) : '') + '</td>').join('') + '</tr></tfoot>';
+  return '<div class="herramientas"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' + pildorasMoneda(monedas, mon) +
+    '<div class="pildoras">' + Object.keys(F).map(k => '<button aria-pressed="' + (S.hojaFiltro === k) + '" data-hf="' + k + '">' + F[k][0] + '<b>' + base.filter(F[k][1]).length + '</b></button>').join('') + '</div></div>' +
+    '<div style="display:flex;gap:8px"><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.hojaBusqueda) + '" aria-label="Buscar"><button class="btn" data-xls>' + icoI('descarga') + 'Descargar Excel</button></div></div>' +
+    '<p class="nota" style="margin:-4px 0 10px">Rep9 del ' + esc(cuandoTxt(h.corte.fechaHora)) + '. Las dos columnas amarillas suman lo que se cobra de más cuando una línea ya tiene atraso: intereses vencidos con IVA y moratorios con IVA.</p>' +
+    '<div class="tabla-wrap hoja-wrap"><table class="tabla hoja">' + encabezado + '<tbody>' + (cuerpo || '<tr><td colspan="' + (SALDOS_COLS.length + 1) + '"><div class="vacio">Sin resultados.</div></td></tr>') + '</tbody>' + (filas.length ? pie : '') + '</table></div>' +
+    (filas.length > MAX ? '<p class="nota" style="margin-top:8px">Se muestran las primeras ' + MAX + ' filas. Descarga el Excel para ver todas.</p>' : '');
+}
+
+function hojaFormulasHTML() {
+  const f = (l, nom, txt, calc) => '<div><span class="letra ' + (calc ? 'calc' : '') + '">' + l + '</span><p><b>' + nom + '</b><span>' + txt + '</span></p></div>';
+  const base = S.hoja && S.hoja.ok ? S.hoja : null;
+  return '<div class="panel"><div class="panel-cab"><div><h3>Columnas de la hoja</h3><p>De dónde sale cada número</p></div></div><div class="panel-cuerpo"><div class="formulas">' +
+    f('A', 'Vencimiento', 'Fecha Vencimiento del Rep1. Si cae en día inhábil, el pago se cobra el siguiente día hábil.') +
+    f('B–C', 'Línea y cliente', 'Línea de crédito y nombre, tal como vienen en el Rep1.') +
+    f('D–G', 'Capital, intereses, otros e IVA', 'Se toman del Rep1 sin cambios.') +
+    f('H', 'Importe del Rep1', 'Debe ser igual a D + E + F + G. Si no coincide, la fila se marca.') +
+    f('J', 'Capital vencido', 'Rep9, columna K. Solo se cobra en la primera cuota de cada línea.', true) +
+    f('K', 'Intereses vencidos', 'Rep9, columnas P + Q: interés vencido más su IVA.', true) +
+    f('L', 'Moratorios acumulados', 'Rep9, columnas R + S + T + U: moratorios, IVA, contingentes e IVA.', true) +
+    f('M', 'Moratorios del periodo', 'Capital vencido × tasa moratoria ÷ ' + (base ? base.baseDias : 360) + ' × días, desde el corte del Rep9 hasta la fecha del pago.', true) +
+    f('N', 'Días', 'Días naturales entre el corte del Rep9 y la fecha base.', true) +
+    f('O', 'Tasa moratoria', 'Tasa anual del contrato (catálogo de tasas) × ' + (base ? base.factor : 2) + '.', true) +
+    f('P', 'Ajustes', 'Pagos o disposiciones registrados en la plataforma después de bajar el Rep9.') +
+    f('Q', 'Total a pagar', 'D + E + F + G + J + K + L + M + P. Es el monto que lleva el correo.', true) +
+    '</div></div></div>' +
+    '<div class="panel"><div class="panel-cab"><div><h3>Reglas que usa el cálculo</h3><p>Se cambian en Configuración</p></div>' + (can('config') ? '<button class="btn chico" data-ir="config">Abrir configuración</button>' : '') + '</div><div class="panel-cuerpo"><ul class="avisos-lista">' +
+    '<li>' + ico('info') + '<span>La fecha base de los días es ' + (base && base.base === 'EFECTIVA' ? 'el día hábil de pago' : 'el vencimiento original del Rep1') + '.</span></li>' +
+    '<li>' + ico('info') + '<span>El saldo vencido de una línea se suma una sola vez, a su primera cuota en el Rep1.</span></li>' +
+    '<li>' + ico('info') + '<span>Si la línea no tiene tasa en el catálogo, los moratorios del periodo quedan en cero y el aviso se marca para revisión.</span></li>' +
+    '<li>' + ico('info') + '<span>Si la línea no aparece en el Rep9, no se suma saldo vencido y el aviso se marca para revisión.</span></li>' +
+    '</ul></div></div>';
+}
+
+function exportarHoja() {
+  if (S.hojaTab === 'saldos' && S.saldosV && S.saldosV.ok) {
+    const h = S.saldosV, k = SALDOS_COLS.filter(c => c[4]).map(c => c[4]);
+    const filas = [SALDOS_COLS.map(c => c[0])].concat(h.filas.map(f => SALDOS_COLS.map(c => c[2] === 'm' ? f[c[4]] : (c[0] === 'Moneda' ? f.moneda : c[0] === 'Línea' ? f.linea : f.cliente))));
+    Object.keys(h.totales).sort().forEach(m => filas.push(['Total ' + m, '', m].concat(SALDOS_COLS.slice(3).map(c => h.totales[m][c[4]]))));
+    descargarExcel('Saldos_vencidos_' + S.estado.tanda.hoy + '.xlsx', [{ nombre: 'Saldos vencidos', filas: filas }]); return;
+  }
+  const h = S.hoja; if (!h || !h.ok) return;
+  const filas = [HOJA_COLS.map(c => c[0] + ' ' + c[1])].concat(h.filas.map(f => [dma(f.fechaNominal), f.linea, f.cliente, f.capital, f.intereses, f.otros, f.iva, f.importeRep1, f.moneda, f.capVencido, f.intVencidos, f.sumaMoratorios, f.moratoriosPeriodo, f.dias, f.tasaMoratoria, f.ajustes, f.total]));
+  Object.keys(h.totales).sort().forEach(m => { const t = h.totales[m]; filas.push(['Total ' + m, '', '', t.capital, t.intereses, t.otros, t.iva, t.importeRep1, m, t.capVencido, t.intVencidos, t.sumaMoratorios, t.moratoriosPeriodo, '', '', t.ajustes, t.total]); });
+  descargarExcel('Hoja_de_trabajo_' + S.estado.tanda.hoy + '.xlsx', [{ nombre: 'Hoja de trabajo', filas: filas }]);
+}
+
 /* ═══════════════════════ CARTERA ═══════════════════════════════════════════ */
+const CHIP_ESTADO = { LISTA: ['amarillo', 'Aviso listo'], REVISAR: ['suave', 'Por revisar'], BLOQUEADA: ['rojo', 'No se puede enviar'], PROGRAMADA: ['', 'Aviso programado'], ESPERA_VISPERA: ['', 'Espera segundo aviso'], COMPLETA: ['oscuro', 'Avisos enviados'], VENCE_HOY: ['suave', 'Vence hoy'], VENCIDA: ['', 'Ya venció'] };
+const ESTADO_TXT = { LISTA: 'Aviso listo para enviar', REVISAR: 'Se puede enviar, con observaciones', BLOQUEADA: 'No se puede enviar todavía', PROGRAMADA: 'Aviso programado', ESPERA_VISPERA: 'Espera su segundo aviso', COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' };
+const FLECHA = '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>';
+
 async function cargarCartera() {
   const raiz = $('#v-cartera');
   if (!S.cartera) {
-    raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Cartera</h2></div></div><div class="cargando"><span class="giro"></span>Leyendo el Rep9…</div>';
+    raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2></div></div><div class="cargando"><span class="giro"></span>Leyendo el Rep9…</div>';
     S.cartera = await api('getCartera');
   }
   pintarCartera();
 }
 
-const CHIP_ESTADO = { LISTA: ['amarillo', 'Aviso listo'], REVISAR: ['suave', 'Por revisar'], BLOQUEADA: ['rojo', 'No se puede enviar'], PROGRAMADA: ['', 'Aviso programado'], ESPERA_VISPERA: ['', 'Espera segundo aviso'], COMPLETA: ['oscuro', 'Avisos enviados'], VENCE_HOY: ['suave', 'Vence hoy'], VENCIDA: ['', 'Ya venció'] };
-
 function pintarCartera() {
   const raiz = $('#v-cartera'), c = S.cartera;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Cartera</h2></div></div><div class="lista"><div class="vacio"><b>Todavía no hay cartera</b>' + esc((c && c.error) || '') + '<div style="margin-top:16px"><button class="btn principal" data-ir="hoy">Subir el Rep9</button></div></div></div>'; $('[data-ir]', raiz).addEventListener('click', () => irA('hoy')); return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2></div></div><div class="panel"><div class="vacio"><b>Todavía no hay cartera</b>' + esc((c && c.error) || '') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Subir el Rep9</button></div></div></div>'; enlazarGeneral(raiz); return; }
   const F = {
     todos: ['Todos', () => true], atraso: ['Con atraso', l => l.saldoVencido > 0.005 || l.capVencido > 0.005],
     proxima: ['Con cuota próxima', l => !!l.proxima], datos: ['Faltan datos', l => !l.tieneCorreo || !l.tieneStp || !l.tieneTasa]
@@ -662,18 +961,20 @@ function pintarCartera() {
   const base = c.lineas.filter(l => !q || (l.linea + ' ' + l.cliente).toLowerCase().indexOf(q) >= 0);
   const lista = base.filter(F[S.filtroCartera][1]);
   const monedas = Object.keys(c.totales).sort();
-  const stats = monedas.map(m => '<div><b>' + dineroC(c.totales[m].saldoTotal, m) + '</b><span>Cartera en ' + m + ', ' + pl(c.totales[m].lineas, 'línea', 'líneas') + '</span></div><div><b>' + dineroC(c.totales[m].saldoVencido, m) + '</b><span>Vencido en ' + m + ', ' + pl(c.totales[m].conVencido, 'cliente', 'clientes') + ' con atraso</span></div>').join('');
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Cartera</h2><p>Todas las líneas del Rep9 con corte ' + cuandoTxt(c.corte.fechaHora) + '. Toca una para ver el detalle del cliente.</p></div></div>' +
-    '<div class="resumen" style="margin:0 0 22px">' + stats + '</div>' +
+  const kp = monedas.map(m => '<div class="kpi' + (m === monedas[0] ? ' dest' : '') + '"><div class="t">Cartera en ' + m + '</div><div class="v">' + dineroC(c.totales[m].saldoTotal, m) + '</div><div class="m">' + pl(c.totales[m].lineas, 'línea', 'líneas') + '</div></div>' +
+    '<div class="kpi"><div class="t">Vencido en ' + m + '</div><div class="v ' + (c.totales[m].saldoVencido > 0.005 ? 'rojo' : '') + '">' + dineroC(c.totales[m].saldoVencido, m) + '</div><div class="m">' + pl(c.totales[m].conVencido, 'cliente', 'clientes') + ' con atraso</div></div>').join('');
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2><p class="lead">Todas las líneas del Rep9 con corte ' + esc(cuandoTxt(c.corte.fechaHora)) + '. Toca una para ver el detalle del cliente.</p></div></div>' +
+    '<div class="kpis">' + kp + '</div>' +
     '<div class="herramientas"><div class="pildoras">' + Object.keys(F).map(k => '<button aria-pressed="' + (S.filtroCartera === k) + '" data-fc="' + k + '">' + F[k][0] + '<b>' + base.filter(F[k][1]).length + '</b></button>').join('') + '</div><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div>' +
-    '<div class="lista"><div class="encabezado-lista cartera"><span>Cliente</span><span class="der">Saldo total</span><span class="der">Vencido</span><span>Próxima cuota</span><span></span></div>' +
-    (lista.length ? lista.slice(0, S.mostrarCartera).map(l => '<div class="fila clic cartera" data-linea="' + esc(l.linea) + '" tabindex="0" role="button"><div class="quien"><b title="' + esc(l.cliente) + '">' + esc(l.cliente) + '</b><small>Línea ' + esc(l.linea) + (l.tieneCorreo && l.tieneStp && l.tieneTasa ? '' : ', faltan datos') + '</small></div>' +
-      '<div class="monto num">' + dinero(l.saldoTotal, l.moneda) + '</div><div class="monto num" style="font-weight:' + (l.saldoVencido > 0.005 ? 600 : 400) + ';color:' + (l.saldoVencido > 0.005 ? 'var(--ladrillo)' : 'var(--gris-600)') + '">' + (l.saldoVencido > 0.005 ? dinero(l.saldoVencido, l.moneda) : 'Al corriente') + '</div>' +
-      '<div class="cuando">' + (l.proxima ? 'Paga ' + dCorta(l.proxima.fechaPago) + ', ' + dinero(l.proxima.total, l.moneda) + '<small><span class="chip ' + CHIP_ESTADO[l.proxima.estado][0] + '">' + CHIP_ESTADO[l.proxima.estado][1] + '</span></small>' : '<span style="color:var(--gris-600)">Sin cuota en esta tanda</span>') + '</div><span class="flecha">' + ico('der') + '</span></div>').join('') : '<div class="vacio"><b>Sin resultados</b>Cambia el filtro o la búsqueda.</div>') + '</div>' +
+    (lista.length ? '<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cliente</th><th class="der">Saldo total</th><th class="der">Vencido</th><th class="oculta-m">Próxima cuota</th><th></th></tr></thead><tbody>' +
+      lista.slice(0, S.mostrarCartera).map(l => '<tr class="clic" data-linea="' + esc(l.linea) + '"><td><div class="quien"><b title="' + esc(l.cliente) + '">' + esc(l.cliente) + '</b><small>Línea ' + esc(l.linea) + (l.tieneCorreo && l.tieneStp && l.tieneTasa ? '' : ', faltan datos') + '</small></div></td>' +
+        '<td class="der monto num">' + dinero(l.saldoTotal, l.moneda) + '</td><td class="der monto num" style="' + (l.saldoVencido > 0.005 ? 'color:var(--ladrillo);font-weight:600' : 'color:var(--g500);font-weight:400') + '">' + (l.saldoVencido > 0.005 ? dinero(l.saldoVencido, l.moneda) : 'Al corriente') + '</td>' +
+        '<td class="oculta-m"><div class="cuando">' + (l.proxima ? 'Paga ' + dCorta(l.proxima.fechaPago) + ', ' + dinero(l.proxima.total, l.moneda) + '<small><span class="chip ' + CHIP_ESTADO[l.proxima.estado][0] + '">' + CHIP_ESTADO[l.proxima.estado][1] + '</span></small>' : '<span style="color:var(--g500)">Sin cuota en esta tanda</span>') + '</div></td><td class="der">' + FLECHA + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="panel"><div class="vacio"><b>Sin resultados</b>Cambia el filtro o la búsqueda.</div></div>') +
     (lista.length > S.mostrarCartera ? '<div style="text-align:center;margin-top:16px"><button class="btn" data-mas>Mostrar más (' + (lista.length - S.mostrarCartera) + ' restantes)</button></div>' : '');
   $$('[data-fc]', raiz).forEach(b => b.addEventListener('click', () => { S.filtroCartera = b.dataset.fc; S.mostrarCartera = 80; pintarCartera(); }));
   const buscar = $('.buscar', raiz); buscar.addEventListener('input', () => { S.busqueda = buscar.value; S.mostrarCartera = 80; const p = buscar.selectionStart; pintarCartera(); const n = $('.buscar', $('#v-cartera')); n.focus(); n.setSelectionRange(p, p); });
-  $$('.fila.clic', raiz).forEach(f => { const ab = () => abrirCliente(f.dataset.linea); f.addEventListener('click', ab); f.addEventListener('keydown', ev => { if (ev.key === 'Enter') ab(); }); });
+  $$('tr[data-linea]', raiz).forEach(f => f.addEventListener('click', () => abrirCliente(f.dataset.linea)));
   const mas = $('[data-mas]', raiz); if (mas) mas.addEventListener('click', () => { S.mostrarCartera += 120; pintarCartera(); });
 }
 
@@ -692,9 +993,9 @@ async function abrirCliente(linea, foco) {
   const fechaIni = proxima ? proxima.fechaNominal : S.estado.tanda.hoy;
   cuerpo.innerHTML =
     (s ? '<div class="bloque"><div class="tres"><div><b class="num">' + dinero(s.saldoTotal, m) + '</b><span>Saldo total</span></div><div><b class="num" style="color:' + (s.saldoVencido > 0.005 ? 'var(--ladrillo)' : 'inherit') + '">' + dinero(s.saldoVencido, m) + '</b><span>Vencido</span></div><div><b class="num">' + dinero(s.capVigente, m) + '</b><span>Capital vigente</span></div></div>' +
-      '<p class="explica">Según el Rep9 con corte ' + cuandoTxt(f.corte9.fechaHora) + '.' + (s.pagosNoAplicados ? ' Tiene ' + dinero(s.pagosNoAplicados, m) + ' en pagos no aplicados.' : '') + '</p></div>'
+      '<p class="explica">Según el Rep9 con corte ' + esc(cuandoTxt(f.corte9.fechaHora)) + '.' + (s.pagosNoAplicados ? ' Tiene ' + dinero(s.pagosNoAplicados, m) + ' en pagos no aplicados.' : '') + '</p></div>'
       : '<div class="bloque"><div class="banner" style="margin:0">' + ico('warn') + '<span>Esta línea no aparece en el Rep9 cargado, así que no hay saldos que mostrar.</span></div></div>') +
-    '<div class="bloque"><h3>Próximas cuotas</h3>' + (f.cuotas.length ? '<ul class="linea-tiempo">' + f.cuotas.map(c => '<li><span class="num">' + dCorta(c.fechaPago) + '</span><span>' + dinero(c.total, c.moneda) + '<br><small>' + ({ LISTA: 'Aviso listo para enviar', REVISAR: 'Se puede enviar, con observaciones', BLOQUEADA: 'No se puede enviar todavía', PROGRAMADA: 'Aviso programado', ESPERA_VISPERA: 'Espera su segundo aviso', COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' })[c.estado] + '</small></span><button class="btn chico" data-cuota="' + esc(c.key) + '">Ver</button></li>').join('') + '</ul>' : '<p style="color:var(--gris-600)">No hay cuotas de esta línea en el Rep1 cargado.</p>') + '</div>' +
+    '<div class="bloque"><h3>Próximas cuotas</h3>' + (f.cuotas.length ? '<ul class="linea-tiempo">' + f.cuotas.map(c => '<li><span class="num">' + dCorta(c.fechaPago) + '</span><span>' + dinero(c.total, c.moneda) + '<br><small>' + ESTADO_TXT[c.estado] + '</small></span><button class="btn chico" data-cuota-ver="' + esc(c.key) + '">Ver cálculo</button></li>').join('') + '</ul>' : '<p style="color:var(--g500)">No hay cuotas de esta línea en el Rep1 cargado.</p>') + '</div>' +
     '<div class="bloque"><h3>¿Cuánto debe al día…?</h3><p class="explica" style="margin:-4px 0 12px">Calcula el saldo exigible con la misma fórmula de los avisos: cuotas del Rep1 que vencen hasta esa fecha, saldo vencido y moratorios hasta ese día.</p>' +
     '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div class="campo" style="min-width:180px"><label for="fc-fecha">Fecha</label><input id="fc-fecha" type="date" value="' + fechaIni + '"></div><button class="btn oscuro" data-calcular ' + (s ? '' : 'disabled') + '>Calcular</button></div><div id="fc-resultado"></div></div>' +
     '<div class="bloque" id="fc-datos"><h3>Datos para los avisos</h3>' +
@@ -702,19 +1003,21 @@ async function abrirCliente(linea, foco) {
     '<div class="campo"><label for="fc-stp">Cuenta STP (18 dígitos)</label><input id="fc-stp" inputmode="numeric" value="' + esc(f.contacto.stp) + '" ' + (can('catalogo') ? '' : 'disabled') + '></div></div>' +
     '<div class="campo" style="margin-top:14px"><label for="fc-correos">Correos del cliente</label><input id="fc-correos" value="' + esc(f.contacto.correo) + '" placeholder="uno@empresa.com, dos@empresa.com" ' + (can('catalogo') ? '' : 'disabled') + '><small>Separados por coma.</small></div>' +
     (can('catalogo') || can('tasas') ? '<div class="acciones" style="margin-top:14px"><button class="btn principal" data-guardar-datos>Guardar datos</button></div>' : '') + '</div>' +
-    '<div class="bloque"><h3>Avisos enviados</h3>' + (f.avisos.length ? '<ul class="linea-tiempo">' + f.avisos.map(a => '<li><span class="num">' + dma(fechaDe(a.timestamp)).slice(0, 5) + ' ' + horaDe(a.timestamp) + '</span><span>' + (tipoTxt[a.tipo] || a.tipo) + ', ' + dinero(a.total, a.moneda) + '<br><small>Pago ' + (a.pagoEfectivo ? dCorta(a.pagoEfectivo) : dCorta(a.fechaVenc)) + '</small></span><span class="chip ' + (a.status === 'ENVIADO' ? 'oscuro' : a.status === 'ERROR' ? 'rojo' : 'suave') + '">' + (estTxt[a.status] || a.status) + '</span></li>').join('') + '</ul>' : '<p style="color:var(--gris-600)">Todavía no se le ha enviado ningún aviso.</p>') + '</div>' +
+    '<div class="bloque"><h3>Avisos enviados</h3>' + (f.avisos.length ? '<ul class="linea-tiempo">' + f.avisos.map(a => '<li><span class="num">' + dm(fechaDe(a.timestamp)) + ' ' + horaDe(a.timestamp) + '</span><span>' + (tipoTxt[a.tipo] || esc(a.tipo)) + ', ' + dinero(a.total, a.moneda) + '<br><small>Pago ' + (a.pagoEfectivo ? dCorta(a.pagoEfectivo) : dCorta(a.fechaVenc)) + '</small></span><span class="chip ' + (a.status === 'ENVIADO' ? 'oscuro' : a.status === 'ERROR' ? 'rojo' : 'suave') + '">' + (estTxt[a.status] || esc(a.status)) + '</span></li>').join('') + '</ul>' : '<p style="color:var(--g500)">Todavía no se le ha enviado ningún aviso.</p>') + '</div>' +
     (f.ajustes.length ? '<div class="bloque"><h3>Ajustes de saldo</h3><ul class="linea-tiempo">' + f.ajustes.map(a => '<li><span class="num">' + esc(a.fecha.slice(0, 10)) + '</span><span>' + dinero(a.monto, m) + '<br><small>' + esc(a.motivo) + '</small></span><span class="chip ' + (a.vigente ? 'amarillo' : '') + '">' + (a.estado === 'PENDIENTE' ? 'Espera aprobación' : a.estado === 'ANULADO' ? 'Anulado' : a.vigente ? 'Aplicando' : 'Caducó') + '</span></li>').join('') + '</ul></div>' : '');
-  $$('[data-cuota]', cuerpo).forEach(b => b.addEventListener('click', () => abrirCuota(b.dataset.cuota)));
+  $$('[data-cuota-ver]', cuerpo).forEach(b => b.addEventListener('click', () => abrirCuota(b.dataset.cuotaVer)));
   $('[data-calcular]', cuerpo).addEventListener('click', async () => {
     const dest = $('#fc-resultado', cuerpo), fecha = $('#fc-fecha', cuerpo).value;
     dest.innerHTML = '<div class="cargando" style="padding:20px"><span class="giro"></span>Calculando…</div>';
     const r = await api('calcularSaldoAFecha', f.linea, fecha);
     if (!r.ok) { dest.innerHTML = '<div class="banner error" style="margin-top:14px"><span>' + esc(r.error) + '</span></div>'; return; }
     const d = r.desglose, cm = r.moneda;
-    const fila = (t, v, cls) => (v || cls) ? '<tr class="' + (cls || '') + '"><td>' + t + '</td><td class="num">' + dinero(v, cm) + '</td></tr>' : '';
-    dest.innerHTML = '<div style="margin-top:16px"><p style="font-weight:600">Al ' + dLarga(r.fecha) + ' debería pagar:</p><div class="grande-num num" style="margin:4px 0 10px">' + dinero(d.total, cm) + '<small>' + cm + '</small></div>' +
-      '<table class="cuentas"><tbody>' + r.cuotas.map(c => '<tr class="sutil"><td>Cuota del ' + dCorta(c.fecha) + '</td><td class="num">' + dinero(c.monto, cm) + '</td></tr>').join('') + fila('Cuotas hasta esa fecha', d.cuotas, 'suma') + fila('Capital vencido', d.capVencido) + fila('Intereses vencidos con IVA', d.intVencidos) + fila('Moratorios acumulados con IVA', d.moratoriosAcum) +
-      fila('Moratorios proyectados (' + pl(r.dias, 'día', 'días') + ' desde el corte)', d.moratoriosProy) + fila('Ajustes de saldo', d.ajustes) + fila('Total', d.total, 'total') + '</tbody></table>' +
+    let k = 0;
+    const lin = (op, nom, imp, o) => { o = o || {}; return '<div class="cinta-lin ' + (o.cero ? 'cero ' : '') + (o.sub ? 'sub' : '') + '" style="--i:' + (k++) + '"><span class="op">' + op + '</span><span class="txt"><span class="nom">' + nom + '</span>' + (o.f ? '<span class="formula">' + o.f + '</span>' : '') + '</span><span class="pts"></span><span class="imp num">' + n2(imp) + '</span></div>'; };
+    dest.innerHTML = '<div style="margin-top:16px"><p style="font-weight:600">Al ' + dLarga(r.fecha) + ' debería pagar:</p>' +
+      '<div class="cinta-fondo"><div class="cinta">' + r.cuotas.map((c, i) => lin(i ? '+' : '', 'Cuota del ' + dCorta(c.fecha), c.monto)).join('') + lin('+', 'Capital vencido', d.capVencido, { cero: !d.capVencido }) + lin('+', 'Intereses vencidos con IVA', d.intVencidos, { cero: !d.intVencidos }) +
+      lin('+', 'Moratorios acumulados con IVA', d.moratoriosAcum, { cero: !d.moratoriosAcum }) + lin('+', 'Moratorios proyectados', d.moratoriosProy, { cero: !d.moratoriosProy, f: pl(r.dias, 'día', 'días') + ' desde el corte' }) + lin('+', 'Ajustes de saldo', d.ajustes, { cero: !d.ajustes }) +
+      '<div class="cinta-total" style="--i:' + (k++) + '"><span class="nom">Total al ' + dCorta(r.fecha) + '</span><span class="imp num">' + dinero(d.total, cm) + '<small>' + cm + '</small></span></div></div></div>' +
       '<p class="explica">Para comparar: el saldo total de la línea en el Rep9 es ' + dinero(r.saldoTotalRep9, cm) + ' e incluye capital que aún no vence.</p>' +
       (r.avisos.length ? '<ul class="avisos-lista" style="margin-top:10px">' + r.avisos.map(a => '<li>' + ico('info') + '<span>' + esc(a) + '</span></li>').join('') + '</ul>' : '') + '</div>';
   });
@@ -724,23 +1027,23 @@ async function abrirCliente(linea, foco) {
     const tasa = $('#fc-tasa', cuerpo).value.trim(), correos = $('#fc-correos', cuerpo).value.trim(), stp = $('#fc-stp', cuerpo).value.trim();
     if (can('tasas') && tasa) { const r = await api('guardarTasa', f.linea, f.cliente, tasa); if (!r.ok) { toast(r.error, 'error'); gd.disabled = false; return; } }
     if (can('catalogo') && (correos || stp)) { const r = await api('guardarContacto', f.linea, f.cliente, correos, stp); if (!r.ok) { toast(r.error, 'error'); gd.disabled = false; return; } }
-    toast('Datos guardados.'); gd.disabled = false; S.cartera = null; S.datos = null;
+    toast('Datos guardados.'); gd.disabled = false; S.cartera = null; S.datos = null; S.hoja = null;
     await cargarCola(true); api('getCatalogos').then(d => { S.datos = d; contadores(); if (S.vista === 'datos') pintarDatos(); });
   });
   if (foco === 'datos') setTimeout(() => { const d = $('#fc-datos', cuerpo); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'start' }); const fi = $('#fc-correos', cuerpo); if (fi && !fi.value) fi.focus(); else if (!$('#fc-tasa', cuerpo).value) $('#fc-tasa', cuerpo).focus(); } }, 150);
 }
 
-/* ═══════════════════════ HISTORIAL ═════════════════════════════════════════ */
+/* ═══════════════════════ HISTORIAL DE ENVÍOS ═══════════════════════════════ */
 async function cargarHistorial() {
   const raiz = $('#v-historial');
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Historial de envíos</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Historial de envíos</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
   S.bitacora = await api('getBitacora', { limite: 600 });
   pintarHistorial();
 }
 
 function pintarHistorial() {
   const raiz = $('#v-historial'), b = S.bitacora;
-  if (!b || !b.ok) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Historial de envíos</h2></div></div><div class="vacio"><b>No se pudo leer</b>' + esc(b && b.error) + '</div>'; return; }
+  if (!b || !b.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Historial de envíos</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(b && b.error) + '</div></div>'; return; }
   const f = S.filtroHist;
   let regs = b.registros;
   if (f.status) regs = regs.filter(r => r.status === f.status);
@@ -748,19 +1051,20 @@ function pintarHistorial() {
   const sts = [['', 'Todos'], ['ENVIADO', 'Enviados'], ['ENVIADO_PRUEBA', 'Pruebas'], ['ERROR', 'Con error'], ['OMITIDO', 'Omitidos']];
   const tipo = { PREVENTIVO: 'Primer aviso', VISPERA: 'Segundo aviso', REENVIO: 'Reenvío', 'T-5': 'Primer aviso', 'T-1': 'Segundo aviso', 'T+0': 'Segundo aviso' };
   const chip = s => ({ ENVIADO: '<span class="chip oscuro">Enviado</span>', ENVIADO_PRUEBA: '<span class="chip suave">Prueba</span>', ERROR: '<span class="chip rojo">Error</span>', OMITIDO: '<span class="chip">Omitido</span>' })[s] || '<span class="chip">' + esc(s) + '</span>';
-  let h = '<div class="titulo-pagina"><div><h2>Historial de envíos</h2><p>Cada intento queda registrado con el corte de los reportes que se usó. Se muestran los últimos ' + b.registros.length + ' movimientos.</p></div></div>' +
+  let h = '<div class="titulo-pag"><div><h2>Historial de envíos</h2><p class="lead">Cada intento queda registrado con el corte de los reportes que se usó. Se muestran los últimos ' + b.registros.length + ' movimientos.</p></div></div>' +
     '<div class="herramientas"><div class="pildoras">' + sts.map(s => '<button aria-pressed="' + (f.status === s[0]) + '" data-st="' + s[0] + '">' + s[1] + '</button>').join('') + '</div><input class="buscar" type="search" placeholder="Buscar cliente, línea o correo" value="' + esc(f.texto) + '" aria-label="Buscar"></div>';
-  if (!regs.length) h += '<div class="lista"><div class="vacio"><b>Sin movimientos</b>Aquí aparecerán los envíos.</div></div>';
+  if (!regs.length) h += '<div class="panel"><div class="vacio"><b>Sin movimientos</b>Aquí aparecerán los envíos.</div></div>';
   let dia = '', abierto = false;
+  const cierra = () => { if (abierto) h += '</tbody></table></div>'; };
   regs.forEach(r => {
     const d = fechaDe(r.timestamp);
-    if (d !== dia) { if (abierto) h += '</div>'; dia = d; abierto = true; h += '<p class="dia-cab">' + (d ? dLargaAnio(d) : 'Sin fecha') + '</p><div class="lista">'; }
-    h += '<div class="fila hist"><span class="num" style="color:var(--gris-600)">' + horaDe(r.timestamp) + '</span><div class="quien"><b title="' + esc(r.cliente) + '">' + esc(r.cliente) + '</b><small>Línea ' + esc(r.linea) + '</small></div>' +
-      '<div class="cuando">' + (tipo[r.tipo] || esc(r.tipo)) + '<small>Pago ' + (r.pagoEfectivo ? dCorta(r.pagoEfectivo) : (r.fechaVenc ? dCorta(r.fechaVenc) : '')) + '</small></div><div class="monto num">' + dinero(r.total, r.moneda) + '</div>' +
-      '<div class="cuando">' + chip(r.status) + '<small>' + esc(r.status === 'ENVIADO' || r.status === 'ENVIADO_PRUEBA' ? (r.usuario || '').split('@')[0] : r.mensaje) + '</small></div>' +
-      '<div>' + (r.status === 'ENVIADO' && can('enviar') ? '<button class="btn chico" data-reenv="' + esc(r.linea + '|' + r.fechaVenc) + '">Reenviar</button>' : '') + '</div></div>';
+    if (d !== dia) { cierra(); dia = d; abierto = true; h += '<p class="dia-cab">' + (d ? dLargaAnio(d) : 'Sin fecha') + '</p><div class="tabla-wrap"><table class="tabla"><tbody>'; }
+    h += '<tr><td class="num" style="color:var(--g500);width:64px">' + horaDe(r.timestamp) + '</td><td>' + quienHTML({ cliente: r.cliente, linea: r.linea }) + '</td>' +
+      '<td><div class="cuando">' + (tipo[r.tipo] || esc(r.tipo)) + '<small>Pago ' + (r.pagoEfectivo ? dCorta(r.pagoEfectivo) : (r.fechaVenc ? dCorta(r.fechaVenc) : '')) + '</small></div></td><td class="der monto num">' + dinero(r.total, r.moneda) + '</td>' +
+      '<td><div class="cuando">' + chip(r.status) + '<small>' + esc(r.status === 'ENVIADO' || r.status === 'ENVIADO_PRUEBA' ? (r.usuario || '').split('@')[0] : r.mensaje) + '</small></div></td>' +
+      '<td class="der">' + (r.status === 'ENVIADO' && can('enviar') ? '<button class="btn chico" data-reenv="' + esc(r.linea + '|' + r.fechaVenc) + '">Reenviar</button>' : '') + '</td></tr>';
   });
-  if (abierto) h += '</div>';
+  cierra();
   raiz.innerHTML = h;
   $$('[data-st]', raiz).forEach(x => x.addEventListener('click', () => { S.filtroHist.status = x.dataset.st; pintarHistorial(); }));
   const buscar = $('.buscar', raiz);
@@ -776,9 +1080,9 @@ function pintarHistorial() {
 /* ═══════════════════════ AJUSTES DE SALDO ══════════════════════════════════ */
 async function cargarAjustes() {
   const raiz = $('#v-ajustes');
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Ajustes de saldo</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
-  const [a, car] = await Promise.all([api('getAjustes'), S.cartera ? Promise.resolve(S.cartera) : api('getCartera')]);
-  S.ajustes = a; S.cartera = car;
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  const res = await Promise.all([api('getAjustes'), S.cartera ? Promise.resolve(S.cartera) : api('getCartera')]);
+  S.ajustes = res[0]; S.cartera = res[1];
   pintarAjustes(); contadores();
 }
 
@@ -786,24 +1090,27 @@ const TIPOS_AJUSTE = { PAGO_APLICADO: 'Pago que llegó', DISPOSICION: 'Disposici
 
 function pintarAjustes() {
   const raiz = $('#v-ajustes'), a = S.ajustes;
-  if (!a || !a.ok) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Ajustes de saldo</h2></div></div><div class="vacio"><b>No se pudo leer</b>' + esc(a && a.error) + '</div>'; return; }
-  const form = can('ajustar') ? '<div class="panel"><h3>Registrar un ajuste</h3><p class="nota">Úsalo cuando un cliente pagó o pidió dinero después de que bajaste el Rep9. El monto del aviso cambia al instante y el ajuste deja de aplicar cuando cargues un Rep9 nuevo, porque ese ya debe traer el movimiento.' +
+  if (!a || !a.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(a && a.error) + '</div></div>'; return; }
+  const form = can('ajustar') ? '<div class="panel"><div class="panel-cab"><div><h3>Registrar un ajuste</h3><p>Úsalo cuando un cliente pagó o pidió dinero después de que bajaste el Rep9.</p></div></div><div class="panel-cuerpo"><p class="nota" style="margin-bottom:14px">El monto del aviso cambia al instante y el ajuste deja de aplicar cuando cargues un Rep9 nuevo, porque ese ya debe traer el movimiento.' +
     (a.conAprobacion ? ' Los ajustes de ' + dineroC(a.umbral) + ' o más esperan la aprobación de otra persona.' : '') + '</p>' +
     '<div class="form-grid"><div class="campo"><label for="aj-linea">Línea de crédito</label><input id="aj-linea" inputmode="numeric" placeholder="Por ejemplo 101306" list="aj-lineas" autocomplete="off"><datalist id="aj-lineas">' + (S.cartera && S.cartera.ok ? S.cartera.lineas.map(l => '<option value="' + esc(l.linea) + '">' + esc(l.cliente) + '</option>').join('') : '') + '</datalist><small id="aj-cliente">&nbsp;</small></div>' +
     '<div class="campo"><label for="aj-tipo">¿Qué pasó?</label><select id="aj-tipo">' + Object.keys(TIPOS_AJUSTE).map(k => '<option value="' + k + '">' + TIPOS_AJUSTE[k] + '</option>').join('') + '</select></div>' +
     '<div class="campo"><label for="aj-monto">Monto</label><input id="aj-monto" inputmode="decimal" placeholder="0.00"><small>En una corrección, usa signo negativo para restar.</small></div>' +
     '<div class="campo"><label for="aj-venc">Cuota afectada (opcional)</label><input id="aj-venc" type="date"><small>Si lo dejas vacío, se aplica a la primera cuota de la línea.</small></div></div>' +
     '<div class="campo" style="margin-top:14px"><label for="aj-motivo">Motivo</label><textarea id="aj-motivo" placeholder="Qué pasó y de dónde viene el dato. Por ejemplo: SPEI recibido a las 16:50, aún no aplicado."></textarea></div>' +
-    '<div class="acciones"><button class="btn principal" id="aj-guardar">Registrar ajuste</button></div></div>' : '';
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Ajustes de saldo</h2><p>Pagos o disposiciones que llegaron después de descargar el Rep9. Rep9 vigente: ' + esc(a.corteRep9 ? 'sí' : 'ninguno') + '.</p></div></div>' + form +
-    '<div class="lista">' + (a.ajustes.length ? a.ajustes.map(x => '<div class="ajuste-fila"><div class="quien"><b class="num">Línea ' + esc(x.linea) + '</b><small>' + esc(x.fecha) + ', ' + esc(x.usuario.split('@')[0]) + '</small></div><div><b class="num">' + dinero(x.monto) + '</b><small style="display:block;color:var(--gris-600)">' + esc(TIPOS_AJUSTE[x.tipo] || x.tipo) + '</small></div>' +
-      '<div style="font-size:14px">' + esc(x.motivo) + (x.nota ? '<small style="display:block;color:var(--gris-600)">' + esc(x.nota) + '</small>' : '') + '</div>' +
-      '<div>' + (x.estado === 'PENDIENTE' ? '<span class="chip suave">Espera aprobación</span>' : x.estado === 'ANULADO' ? '<span class="chip">Anulado</span>' : x.vigente ? '<span class="chip amarillo">Aplicando</span>' : '<span class="chip">Caducó con el Rep9 nuevo</span>') + '</div>' +
-      '<div style="white-space:nowrap">' + (x.estado === 'PENDIENTE' && can('aprobar') && x.usuario.toLowerCase() !== a.yo ? '<button class="btn chico principal" data-aprobar="' + esc(x.id) + '">Aprobar</button> ' : '') + ((x.estado === 'ACTIVO' || x.estado === 'PENDIENTE') && can('ajustar') ? '<button class="btn chico" data-anular="' + esc(x.id) + '">Anular</button>' : '') + '</div></div>').join('') : '<div class="vacio"><b>Sin ajustes</b>Los que registres aparecerán aquí.</div>') + '</div>';
+    '<div class="acciones"><button class="btn principal" id="aj-guardar">Registrar ajuste</button></div></div></div>' : '';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2><p class="lead">Pagos o disposiciones que llegaron después de descargar el Rep9. ' + (a.corteRep9 ? 'Hay un Rep9 vigente.' : 'Todavía no hay un Rep9 cargado.') + '</p></div></div>' + form +
+    '<div class="panel"><div class="panel-cab"><div><h3>Ajustes registrados</h3><p>' + pl(a.ajustes.length, 'ajuste', 'ajustes') + '</p></div></div>' +
+    (a.ajustes.length ? '<div class="tabla-wrap" style="border:0;border-radius:0"><table class="tabla"><tbody>' + a.ajustes.map(x => '<tr><td><div class="quien"><b class="num">Línea ' + esc(x.linea) + '</b><small>' + esc(x.fecha) + ', ' + esc(x.usuario.split('@')[0]) + '</small></div></td>' +
+      '<td><div class="cuando"><span class="num" style="font-weight:600">' + dinero(x.monto) + '</span><small>' + esc(TIPOS_AJUSTE[x.tipo] || x.tipo) + '</small></div></td>' +
+      '<td class="motivo">' + esc(x.motivo) + (x.nota ? '<small style="display:block;color:var(--g500)">' + esc(x.nota) + '</small>' : '') + '</td>' +
+      '<td>' + (x.estado === 'PENDIENTE' ? '<span class="chip suave">Espera aprobación</span>' : x.estado === 'ANULADO' ? '<span class="chip">Anulado</span>' : x.vigente ? '<span class="chip amarillo">Aplicando</span>' : '<span class="chip">Caducó con el Rep9 nuevo</span>') + '</td>' +
+      '<td><div class="celda-acc">' + (x.estado === 'PENDIENTE' && can('aprobar') && x.usuario.toLowerCase() !== a.yo ? '<button class="btn chico principal" data-aprobar="' + esc(x.id) + '">Aprobar</button>' : '') + ((x.estado === 'ACTIVO' || x.estado === 'PENDIENTE') && can('ajustar') ? '<button class="btn chico" data-anular="' + esc(x.id) + '">Anular</button>' : '') + '</div></td></tr>').join('') + '</tbody></table></div>'
+      : '<div class="vacio"><b>Sin ajustes</b>Los que registres aparecerán aquí.</div>') + '</div>';
   const li = $('#aj-linea', raiz);
   if (li) li.addEventListener('input', () => {
     const l = S.cartera && S.cartera.ok ? S.cartera.lineas.find(x => x.linea === li.value.trim()) : null;
-    $('#aj-cliente', raiz).textContent = l ? l.cliente + ', saldo ' + dinero(l.saldoTotal, l.moneda) : ' ';
+    $('#aj-cliente', raiz).textContent = l ? l.cliente + ', saldo ' + dinero(l.saldoTotal, l.moneda) : ' ';
   });
   const g = $('#aj-guardar', raiz);
   if (g) g.addEventListener('click', async () => {
@@ -812,20 +1119,20 @@ function pintarAjustes() {
     g.disabled = false;
     if (!r.ok) { toast(r.error, 'error'); return; }
     toast(r.estado === 'PENDIENTE' ? 'Registrado. Espera la aprobación de otra persona.' : 'Registrado. El monto del aviso ya cambió.');
-    await cargarAjustes(); cargarCola(true);
+    S.hoja = null; await cargarAjustes(); cargarCola(true);
   });
-  $$('[data-aprobar]', raiz).forEach(b => b.addEventListener('click', async () => { const r = await api('aprobarAjuste', b.dataset.aprobar); if (!r.ok) toast(r.error, 'error'); else { toast('Ajuste aprobado.'); await cargarAjustes(); cargarCola(true); } }));
+  $$('[data-aprobar]', raiz).forEach(b => b.addEventListener('click', async () => { const r = await api('aprobarAjuste', b.dataset.aprobar); if (!r.ok) toast(r.error, 'error'); else { toast('Ajuste aprobado.'); S.hoja = null; await cargarAjustes(); cargarCola(true); } }));
   $$('[data-anular]', raiz).forEach(b => b.addEventListener('click', () => {
-    const velo = abrirModal({ titulo: 'Anular ajuste', cuerpo: '<div class="campo"><label for="mot-an">¿Por qué se anula?</label><textarea id="mot-an"></textarea></div>', pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn peligro" data-ir>Anular ajuste</button>' });
+    const velo = abrirModal({ titulo: 'Anular ajuste', cuerpo: '<div class="campo"><label for="mot-an">¿Por qué se anula?</label><textarea id="mot-an"></textarea></div>', pie: '<button class="btn" data-cerrar>Cancelar</button><button class="btn peligro" data-ir-an>Anular ajuste</button>' });
     $('[data-cerrar]', velo).addEventListener('click', cerrarModal);
-    $('[data-ir]', velo).addEventListener('click', async () => { const r = await api('anularAjuste', b.dataset.anular, $('#mot-an', velo).value); if (!r.ok) { toast(r.error, 'error'); return; } cerrarModal(); toast('Ajuste anulado.'); await cargarAjustes(); cargarCola(true); });
+    $('[data-ir-an]', velo).addEventListener('click', async () => { const r = await api('anularAjuste', b.dataset.anular, $('#mot-an', velo).value); if (!r.ok) { toast(r.error, 'error'); return; } cerrarModal(); toast('Ajuste anulado.'); S.hoja = null; await cargarAjustes(); cargarCola(true); });
   }));
 }
 
 /* ═══════════════════════ DATOS DE CLIENTES ═════════════════════════════════ */
 async function cargarDatos() {
   const raiz = $('#v-datos');
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Datos de clientes</h2></div></div><div class="cargando"><span class="giro"></span>Revisando la cartera…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="cargando"><span class="giro"></span>Revisando la cartera…</div>';
   S.datos = await api('getCatalogos');
   pintarDatos(); contadores();
 }
@@ -841,15 +1148,16 @@ const LISTAS_DATOS = [
 
 function pintarDatos() {
   const raiz = $('#v-datos'), c = S.datos;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Datos de clientes</h2></div></div><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div>'; return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
   const a = c.auditoria;
-  if (!a.cartera) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Datos de clientes</h2></div></div><div class="lista"><div class="vacio"><b>Primero sube un Rep9</b>La revisión compara los catálogos contra la cartera del Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="hoy">Ir a subir el reporte</button></div></div></div>'; $('[data-ir]', raiz).addEventListener('click', () => irA('hoy')); return; }
+  if (!a.cartera) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="panel"><div class="vacio"><b>Primero sube un Rep9</b>La revisión compara los catálogos contra la cartera del Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a subir el reporte</button></div></div></div>'; enlazarGeneral(raiz); return; }
   const actual = LISTAS_DATOS.find(l => l[0] === S.listaDatos) || LISTAS_DATOS[0];
   const lista = a[actual[0]] || [];
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Datos de clientes</h2><p>Lo que le falta a la cartera para que sus avisos y sus moratorios salgan completos.</p></div></div>' +
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2><p class="lead">Lo que le falta a la cartera para que sus avisos y sus moratorios salgan completos.</p></div></div>' +
     '<div class="pildoras" style="margin-bottom:12px">' + LISTAS_DATOS.map(l => '<button aria-pressed="' + (S.listaDatos === l[0]) + '" data-cl="' + l[0] + '">' + l[1] + '<b>' + (a[l[0]] || []).length + '</b></button>').join('') + '</div>' +
-    '<p class="grupo-nota">' + esc(actual[2]) + '</p>' +
-    '<div class="lista">' + (lista.length ? lista.slice(0, 150).map(x => '<div class="fila simple"><div class="quien"><b title="' + esc(x.cliente || '') + '">' + esc(x.cliente || ('Línea ' + x.linea)) + '</b><small>Línea ' + esc(x.linea) + (x.correo ? ', ' + esc(x.correo) : '') + '</small></div><div class="cuando">' + (x.saldo ? 'Saldo ' + dinero(x.saldo, x.moneda) : '') + '</div><div class="monto">' + (can('catalogo') ? '<button class="btn chico principal" data-ficha="' + esc(x.linea) + '">Completar</button>' : '') + '</div><span></span></div>').join('') + (lista.length > 150 ? '<div class="vacio" style="padding:14px">Se muestran las primeras 150.</div>' : '') : '<div class="vacio"><b>Todo en orden</b>No hay pendientes en esta lista.</div>') + '</div>';
+    '<p class="grupo-nota" style="padding-left:0">' + esc(actual[2]) + '</p>' +
+    (lista.length ? '<div class="tabla-wrap"><table class="tabla"><tbody>' + lista.slice(0, 150).map(x => '<tr><td><div class="quien"><b title="' + esc(x.cliente || '') + '">' + esc(x.cliente || ('Línea ' + x.linea)) + '</b><small>Línea ' + esc(x.linea) + (x.correo ? ', ' + esc(x.correo) : '') + '</small></div></td><td><div class="cuando">' + (x.saldo ? 'Saldo ' + dinero(x.saldo, x.moneda) : '') + '</div></td><td class="der">' + (can('catalogo') ? '<button class="btn chico principal" data-ficha="' + esc(x.linea) + '">Completar</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' + (lista.length > 150 ? '<p class="nota" style="margin-top:8px">Se muestran las primeras 150.</p>' : '')
+      : '<div class="panel"><div class="vacio"><b>Todo en orden</b>No hay pendientes en esta lista.</div></div>');
   $$('[data-cl]', raiz).forEach(b => b.addEventListener('click', () => { S.listaDatos = b.dataset.cl; pintarDatos(); }));
   $$('[data-ficha]', raiz).forEach(b => b.addEventListener('click', () => abrirCliente(b.dataset.ficha, 'datos')));
 }
@@ -891,7 +1199,7 @@ const CONFIG_GRUPOS = [
 
 async function cargarConfig() {
   const raiz = $('#v-config');
-  raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Configuración</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
   S.config = await api('getConfigUI');
   pintarConfig();
 }
@@ -905,29 +1213,30 @@ function controlParam(clave, valor, tipo, dis) {
 
 function pintarConfig() {
   const raiz = $('#v-config'), c = S.config;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pagina"><div><h2>Configuración</h2></div></div><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div>'; return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
   const admin = c.puedeConfig, val = {}; c.params.forEach(p => val[p.clave] = p.valor);
   const usadas = new Set();
-  let h = '<div class="titulo-pagina"><div><h2>Configuración</h2><p>' + (admin ? 'Los cambios se guardan al salir de cada campo y quedan registrados.' : 'Solo un administrador puede cambiar estos valores.') + '</p></div></div>';
+  const panel = (t, n, cuerpo) => '<div class="panel"><div class="panel-cab"><div><h3>' + t + '</h3>' + (n ? '<p>' + n + '</p>' : '') + '</div></div><div class="panel-cuerpo">' + cuerpo + '</div></div>';
+  let h = '<div class="titulo-pag"><div><h2>Configuración</h2><p class="lead">' + (admin ? 'Los cambios se guardan al salir de cada campo y quedan registrados.' : 'Solo un administrador puede cambiar estos valores.') + '</p></div></div>';
   CONFIG_GRUPOS.forEach(gr => {
-    h += '<div class="panel"><h3>' + gr.t + '</h3>' + (gr.n ? '<p class="nota">' + gr.n + '</p>' : '');
+    let cu = '';
     if (gr.chat) {
-      h += '<div class="ajuste-param"><label>Conexión con Chat<small>' + (c.chatConfigurado ? 'Conectado.' : 'Todavía no está conectado.') + ' El enlace (webhook) se guarda en las propiedades del script, no en la hoja ni en el código.</small></label><div class="control" style="gap:8px;flex-wrap:wrap">' +
+      cu += '<div class="ajuste-param"><label>Conexión con Chat<small>' + (c.chatConfigurado ? 'Conectado.' : 'Todavía no está conectado.') + ' El enlace (webhook) se guarda en las propiedades del script, no en la hoja ni en el código.</small></label><div class="control" style="gap:8px;flex-wrap:wrap">' +
         (admin ? '<input id="cfg-hook" type="password" placeholder="https://chat.googleapis.com/v1/spaces/…" autocomplete="off" style="max-width:280px"><button class="btn chico principal" id="cfg-guardar-hook">Guardar</button><button class="btn chico" id="cfg-probar">Enviar mensaje de prueba</button>' : '') + '</div></div>' +
         '<div class="ajuste-param"><label>Recordatorios programados<small>' + (c.triggers.length ? 'Activos: ' + esc(c.triggers.join(', ')) + '.' : 'No hay ninguno instalado.') + '</small></label><div class="control">' + (admin ? '<button class="btn chico" id="cfg-triggers">Instalar o reinstalar</button>' : '') + '</div></div>';
     }
     gr.p.forEach(p => { if (!(p[0] in val)) return; usadas.add(p[0]);
-      h += '<div class="ajuste-param"><label for="">' + p[1] + (p[2] ? '<small>' + p[2] + '</small>' : '') + '</label><div class="control">' + controlParam(p[0], val[p[0]], p[3], !admin) + '</div></div>'; });
+      cu += '<div class="ajuste-param"><label>' + p[1] + (p[2] ? '<small>' + p[2] + '</small>' : '') + '</label><div class="control">' + controlParam(p[0], val[p[0]], p[3], !admin) + '</div></div>'; });
     if (gr.prueba && admin && String(val.MODO_PRUEBA).toUpperCase() === 'TRUE')
-      h += '<div class="ajuste-param"><label>Fecha simulada<small>Para ensayar un día distinto de hoy. Solo funciona en modo prueba. Vacío usa la fecha real.</small></label><div class="control" style="gap:8px"><input type="date" id="cfg-fecha" value="' + esc(S.estado.fechaSimulada || '') + '" style="max-width:180px"><button class="btn chico" id="cfg-fecha-g">Aplicar</button></div></div>';
-    h += '</div>';
+      cu += '<div class="ajuste-param"><label>Fecha simulada<small>Para ensayar un día distinto de hoy. Solo funciona en modo prueba. Vacío usa la fecha real.</small></label><div class="control" style="gap:8px"><input type="date" id="cfg-fecha" value="' + esc(S.estado.fechaSimulada || '') + '" style="max-width:180px"><button class="btn chico" id="cfg-fecha-g">Aplicar</button></div></div>';
+    h += panel(gr.t, gr.n, cu);
   });
-  h += '<div class="panel"><h3>Días inhábiles</h3><p class="nota">Sábados y domingos nunca cuentan. 2026 coincide con el calendario publicado por la CNBV; los años siguientes se calculan por regla y conviene validarlos cuando la CNBV publique el suyo.</p><div class="fechas-rep1">' +
-    c.inhabiles.map(d => '<span class="dentro">' + dCorta(d.fecha) + ' ' + d.fecha.slice(0, 4) + ': ' + esc(d.descripcion) + '</span>').join('') + '</div>' +
-    (admin ? '<div class="form-grid" style="margin-top:16px"><div class="campo"><label for="inh-f">Fecha</label><input id="inh-f" type="date"></div><div class="campo"><label for="inh-d">Descripción</label><input id="inh-d"></div><div class="campo"><label for="inh-e">Acción</label><select id="inh-e"><option value="ACTIVO">Agregar como inhábil</option><option value="QUITAR">Quitar de inhábiles</option></select></div></div><div class="acciones"><button class="btn" id="inh-g">Guardar fecha</button></div>' : '') + '</div>';
+  h += panel('Días inhábiles', 'Sábados y domingos nunca cuentan. 2026 coincide con el calendario publicado por la CNBV; los años siguientes se calculan por regla y conviene validarlos cuando la CNBV publique el suyo.',
+    '<div class="fechas-chips">' + c.inhabiles.map(d => '<span class="dentro">' + dCorta(d.fecha) + ' ' + d.fecha.slice(0, 4) + ': ' + esc(d.descripcion) + '</span>').join('') + '</div>' +
+    (admin ? '<div class="form-grid" style="margin-top:16px"><div class="campo"><label for="inh-f">Fecha</label><input id="inh-f" type="date"></div><div class="campo"><label for="inh-d">Descripción</label><input id="inh-d"></div><div class="campo"><label for="inh-e">Acción</label><select id="inh-e"><option value="ACTIVO">Agregar como inhábil</option><option value="QUITAR">Quitar de inhábiles</option></select></div></div><div class="acciones"><button class="btn" id="inh-g">Guardar fecha</button></div>' : ''));
   const resto = c.params.filter(p => !usadas.has(p.clave));
-  h += '<details class="panel"><summary style="cursor:pointer;font-family:var(--f-display);font-weight:600;font-size:18px">Otros parámetros</summary><p class="nota" style="margin-top:10px">Datos bancarios que aparecen en los correos y parámetros heredados de la versión anterior.</p>' +
-    resto.map(p => '<div class="ajuste-param"><label>' + esc(p.clave) + (p.descripcion ? '<small>' + esc(p.descripcion) + '</small>' : '') + '</label><div class="control"><input data-clave="' + esc(p.clave) + '" value="' + esc(p.valor) + '"' + (admin && !p.sensible ? '' : ' disabled') + '></div></div>').join('') + '</details>';
+  h += '<details class="plegable"><summary>' + ico('info') + '<h3>Otros parámetros</h3><span class="cuantos">' + resto.length + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="panel-cuerpo"><p class="nota" style="margin-bottom:6px">Datos bancarios que aparecen en los correos y parámetros heredados de la versión anterior.</p>' +
+    resto.map(p => '<div class="ajuste-param"><label>' + esc(p.clave) + (p.descripcion ? '<small>' + esc(p.descripcion) + '</small>' : '') + '</label><div class="control"><input data-clave="' + esc(p.clave) + '" value="' + esc(p.valor) + '"' + (admin && !p.sensible ? '' : ' disabled') + '></div></div>').join('') + '</div></details>';
   raiz.innerHTML = h;
   if (admin) {
     const q = id => $(id, raiz);
@@ -940,9 +1249,9 @@ function pintarConfig() {
       const valor = inp.dataset.bool !== undefined ? (inp.checked ? 'TRUE' : 'FALSE') : inp.value;
       const r = await api('setConfig', inp.dataset.clave, valor);
       if (!r.ok) { toast(r.error, 'error'); cargarConfig(); return; }
-      toast('Guardado.'); await refrescarEstado(); if (inp.dataset.clave === 'MODO_PRUEBA') cargarConfig(); if (S.cola) cargarCola(true);
+      toast('Guardado.'); S.hoja = null; await refrescarEstado(); if (inp.dataset.clave === 'MODO_PRUEBA') cargarConfig(); if (S.cola) cargarCola(true);
     }));
-    if (q('#cfg-fecha-g')) q('#cfg-fecha-g').addEventListener('click', async () => { const r = await api('setFechaSimulada', q('#cfg-fecha').value); if (!r.ok) toast(r.error, 'error'); else { toast('Fecha simulada aplicada.'); await refrescarEstado(); if (S.cola) cargarCola(true); } });
+    if (q('#cfg-fecha-g')) q('#cfg-fecha-g').addEventListener('click', async () => { const r = await api('setFechaSimulada', q('#cfg-fecha').value); if (!r.ok) toast(r.error, 'error'); else { toast('Fecha simulada aplicada.'); S.hoja = null; await refrescarEstado(); if (S.cola) cargarCola(true); } });
     q('#inh-g').addEventListener('click', async () => { const r = await api('guardarInhabil', q('#inh-f').value, q('#inh-d').value, q('#inh-e').value); if (!r.ok) toast(r.error, 'error'); else { toast('Calendario actualizado.'); await refrescarEstado(); cargarConfig(); } });
   }
 }

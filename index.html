@@ -9,46 +9,88 @@
 </head>
 <body>
 
-<!-- Íconos: cada estado tiene su propia forma además de su color -->
+<!-- Íconos. Cada estado tiene forma propia además de color. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="g-listo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#FDB913"/><path d="M6.8 12.4l3.6 3.6 6.8-7.4" fill="none" stroke="#262626" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="g-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#262626"/><path d="M6.8 12.4l3.6 3.6 6.8-7.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-  <symbol id="g-warn" viewBox="0 0 24 24"><path d="M12 2.6L22.2 20.4H1.8z" fill="#FFF3CF" stroke="#FDB913" stroke-width="2" stroke-linejoin="round"/><path d="M12 9.5v5" stroke="#6B4A00" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.3" fill="#6B4A00"/></symbol>
+  <symbol id="g-actual" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#FDB913" stroke-width="2.4"/><circle cx="12" cy="12" r="4.2" fill="#FDB913"/></symbol>
+  <symbol id="g-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#2A2A2A"/><path d="M6.8 12.4l3.6 3.6 6.8-7.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-warn" viewBox="0 0 24 24"><path d="M12 2.6L22.2 20.4H1.8z" fill="#FFF0C2" stroke="#FDB913" stroke-width="2" stroke-linejoin="round"/><path d="M12 9.5v5" stroke="#6B4A00" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.3" fill="#6B4A00"/></symbol>
   <symbol id="g-error" viewBox="0 0 24 24"><rect x="1.8" y="1.8" width="20.4" height="20.4" rx="5" fill="#B3261E"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></symbol>
-  <symbol id="g-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#A0A0A0" stroke-width="2"/><path d="M12 6.5V12l3.6 2.2" fill="none" stroke="#A0A0A0" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="g-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#9A9A9A" stroke-width="2"/><path d="M12 6.5V12l3.6 2.2" fill="none" stroke="#9A9A9A" stroke-width="2" stroke-linecap="round"/></symbol>
   <symbol id="g-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#6B6B6B" stroke-width="1.8"/><path d="M12 11v6" stroke="#6B6B6B" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="#6B6B6B"/></symbol>
-  <symbol id="g-subir" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17" fill="none" stroke="#262626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="g-vacio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#C8C8C8" stroke-width="2" stroke-dasharray="3 3"/></symbol>
+  <symbol id="g-subir" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17" fill="none" stroke="#2A2A2A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="g-abajo" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="g-der" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <!-- navegación -->
+  <symbol id="i-hoy" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-reportes" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></symbol>
+  <symbol id="i-avisos" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+  <symbol id="i-hoja" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/></symbol>
+  <symbol id="i-cartera" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18"/></symbol>
+  <symbol id="i-historial" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-ajustes" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+  <symbol id="i-datos" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.6 1.8-2.4 3-2.4s2.4.8 3 2.4M14 10h4M14 14h3"/></symbol>
+  <symbol id="i-config" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></symbol>
+  <symbol id="i-descarga" viewBox="0 0 24 24"><path d="M12 4v12M7 11l5 5 5-5M4 19h16"/></symbol>
+  <symbol id="i-enviar" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></symbol>
+  <symbol id="i-ojo" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
 </svg>
 
-<header class="barra">
-  <div class="barra-in">
-    <a class="marca" href="#" onclick="return false"><span class="marca-sello">C</span><span class="marca-nombre">Cobranza<br>Cualli</span></a>
+<div class="app">
+  <aside class="lado" aria-label="Menú principal">
+    <div class="lado-marca">
+      <div class="logo-tile"><img src="https://cualli.mx/wp-content/uploads/2022/07/cualli-bl@3x.png" alt="Cualli" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'logo-c',textContent:'C'}))"></div>
+      <div><b>Cobranza</b><small>Financiera Cualli</small></div>
+    </div>
     <nav class="nav" id="nav" aria-label="Secciones">
-      <button data-nav="hoy">Hoy</button>
-      <button data-nav="avisos">Avisos<span class="cuenta oculto" id="cuenta-avisos"></span></button>
-      <button data-nav="cartera">Cartera</button>
-      <button data-nav="historial">Historial</button>
-      <button data-nav="ajustes">Ajustes de saldo<span class="cuenta oculto" id="cuenta-ajustes"></span></button>
-      <button data-nav="datos">Datos de clientes<span class="cuenta rojo oculto" id="cuenta-datos"></span></button>
-      <button data-nav="config">Configuración</button>
+      <div class="nav-grupo">
+        <div class="nav-etq">Operación</div>
+        <button class="nav-item" data-nav="hoy"><svg><use href="#i-hoy"/></svg>Hoy</button>
+        <button class="nav-item" data-nav="reportes"><svg><use href="#i-reportes"/></svg>Reportes</button>
+        <button class="nav-item" data-nav="avisos"><svg><use href="#i-avisos"/></svg>Avisos<span class="cuenta oculto" id="cuenta-avisos"></span></button>
+      </div>
+      <div class="nav-grupo">
+        <div class="nav-etq">Análisis</div>
+        <button class="nav-item" data-nav="hoja"><svg><use href="#i-hoja"/></svg>Hoja de trabajo</button>
+        <button class="nav-item" data-nav="cartera"><svg><use href="#i-cartera"/></svg>Cartera</button>
+      </div>
+      <div class="nav-grupo">
+        <div class="nav-etq">Control</div>
+        <button class="nav-item" data-nav="historial"><svg><use href="#i-historial"/></svg>Historial de envíos</button>
+        <button class="nav-item" data-nav="ajustes"><svg><use href="#i-ajustes"/></svg>Ajustes de saldo<span class="cuenta oculto" id="cuenta-ajustes"></span></button>
+      </div>
+      <div class="nav-grupo">
+        <div class="nav-etq">Administración</div>
+        <button class="nav-item" data-nav="datos"><svg><use href="#i-datos"/></svg>Datos de clientes<span class="cuenta rojo oculto" id="cuenta-datos"></span></button>
+        <button class="nav-item" data-nav="config"><svg><use href="#i-config"/></svg>Configuración</button>
+      </div>
     </nav>
-    <div class="yo"><strong id="yo-correo">…</strong><span id="yo-rol"></span></div>
+    <div class="lado-pie">
+      <div class="avatar" id="yo-inicial">·</div>
+      <div class="yo"><b id="yo-correo">…</b><span id="yo-rol"></span></div>
+    </div>
+  </aside>
+
+  <div class="cuerpo-app">
+    <header class="ctx">
+      <div class="ctx-fecha"><b id="ctx-fecha">…</b><span id="ctx-tanda"></span></div>
+      <div class="ctx-reportes" id="ctx-reportes"></div>
+    </header>
+    <div class="banners" id="banners"></div>
+    <main class="contenido">
+      <section class="seccion" id="v-hoy"></section>
+      <section class="seccion oculto" id="v-reportes"></section>
+      <section class="seccion oculto" id="v-avisos"></section>
+      <section class="seccion oculto" id="v-hoja"></section>
+      <section class="seccion oculto" id="v-cartera"></section>
+      <section class="seccion oculto" id="v-historial"></section>
+      <section class="seccion oculto" id="v-ajustes"></section>
+      <section class="seccion oculto" id="v-datos"></section>
+      <section class="seccion oculto" id="v-config"></section>
+    </main>
   </div>
-</header>
-
-<div class="banners" id="banners"></div>
-
-<main>
-  <section class="seccion" id="v-hoy"></section>
-  <section class="seccion oculto pagina" id="v-avisos"></section>
-  <section class="seccion oculto pagina" id="v-cartera"></section>
-  <section class="seccion oculto pagina" id="v-historial"></section>
-  <section class="seccion oculto pagina" id="v-ajustes"></section>
-  <section class="seccion oculto pagina" id="v-datos"></section>
-  <section class="seccion oculto pagina" id="v-config"></section>
-</main>
+</div>
 
 <div id="lateral-root"></div>
 <div id="modal-root"></div>

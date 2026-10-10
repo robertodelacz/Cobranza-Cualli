@@ -176,3 +176,89 @@ function armarResumenInicio_() {
     avisosSemana: regs.filter(b => b.timestamp.slice(0, 10) >= desde).length
   };
 }
+
+
+// ─── HOJA DE TRABAJO (réplica de la hoja de cálculo, con su rastro) ─────────
+
+/** Una fila por cuota del Rep1 con las mismas columnas de la hoja de Sheets. */
+function armarHojaTrabajo_() {
+  const cola = calcularCola_();
+  if (!cola.ok) return cola;
+  const filas = cola.items.map(i => {
+    const t = i.traza, d = i.desglose;
+    return {
+      key: i.key, linea: i.linea, cliente: i.cliente, moneda: i.moneda, fechaNominal: i.fechaNominal, fechaPago: i.fechaPago,
+      capital: d.capital, intereses: d.intereses, otros: d.otros, iva: d.iva, importeRep1: t.rep1.importe,
+      capVencido: d.capVencido, intVencidos: d.intVencidos, sumaMoratorios: d.moratoriosAcum, moratoriosPeriodo: d.moratoriosProy,
+      dias: i.diasProy, tasaMoratoria: i.tasaMoratoria, ajustes: d.ajustes, total: d.total,
+      estado: i.estado, accion: i.accion, sinRep9: i.sinRep9, sinTasa: i.sinTasa, aplicaVencido: t.aplicaVencido,
+      cuadra: Math.abs(d.cuota - t.rep1.importe) <= 0.01
+    };
+  });
+  const totales = {};
+  filas.forEach(f => {
+    const t = totales[f.moneda] || (totales[f.moneda] = { filas: 0, capital: 0, intereses: 0, otros: 0, iva: 0, importeRep1: 0, capVencido: 0, intVencidos: 0, sumaMoratorios: 0, moratoriosPeriodo: 0, ajustes: 0, total: 0 });
+    t.filas++;
+    ['capital', 'intereses', 'otros', 'iva', 'importeRep1', 'capVencido', 'intVencidos', 'sumaMoratorios', 'moratoriosPeriodo', 'ajustes', 'total'].forEach(k => { t[k] = round2_(t[k] + f[k]); });
+  });
+  return {
+    ok: true, hoy: cola.hoy, corte1: cola.frescura.rep1.corte, corte9: cola.frescura.rep9.corte,
+    factor: cfgNum_('FACTOR_TASA_MORATORIA', 2), base: cfgStr_('BASE_MORATORIOS', 'NOMINAL').toUpperCase() === 'EFECTIVA' ? 'EFECTIVA' : 'NOMINAL',
+    baseDias: BASE_DIAS_ANIO, filas: filas, totales: totales
+  };
+}
+
+/** Rep9 con las dos columnas calculadas de la hoja "Saldos_Vencidos" (AE y AF). */
+function armarSaldosVencidos_() {
+  const r9 = rep9Cargado_();
+  if (!r9) return { ok: false, codigo: 'SIN_REP9', error: 'Todavía no hay un Rep9 cargado.' };
+  const filas = [], totales = {};
+  r9.rows.forEach(x => {
+    const linea = normLinea_(x[REP9.LINEA]); if (!linea) return;
+    const moneda = String(x[REP9.MONEDA] || 'MXN').trim().toUpperCase() || 'MXN';
+    const f = {
+      linea: linea, cliente: String(x[REP9.NOMBRE] || ''), moneda: moneda,
+      capVigente: round2_(num_(x[REP9.CAP_VIGENTE])), capVencido: round2_(num_(x[REP9.CAP_VENCIDO])),
+      intVencido: round2_(num_(x[REP9.INT_VENCIDO])), ivaIntVencido: round2_(num_(x[REP9.IVA_INT_VENCIDO])),
+      moratorios: round2_(num_(x[REP9.MORATORIOS])), ivaMoratorios: round2_(num_(x[REP9.IVA_MORATORIOS])),
+      morCont: round2_(num_(x[REP9.MOR_CONT])), ivaMorCont: round2_(num_(x[REP9.IVA_MOR_CONT])),
+      saldoVencido: round2_(num_(x[REP9.SALDO_VENCIDO])), saldoTotal: round2_(num_(x[REP9.SALDO_TOTAL]))
+    };
+    f.sumaMoratorios = round2_(f.moratorios + f.ivaMoratorios + f.morCont + f.ivaMorCont);
+    f.interesesVencidos = round2_(f.intVencido + f.ivaIntVencido);
+    filas.push(f);
+    const t = totales[moneda] || (totales[moneda] = { filas: 0, capVigente: 0, capVencido: 0, intVencido: 0, ivaIntVencido: 0, moratorios: 0, ivaMoratorios: 0, morCont: 0, ivaMorCont: 0, sumaMoratorios: 0, interesesVencidos: 0, saldoVencido: 0, saldoTotal: 0 });
+    t.filas++;
+    Object.keys(t).forEach(k => { if (k !== 'filas') t[k] = round2_(t[k] + f[k]); });
+  });
+  return { ok: true, corte: r9.corte, filas: filas, totales: totales };
+}
+
+/** El reporte tal como quedó guardado (para verlo dentro de la plataforma). */
+function leerReporteCargado_(tipo) {
+  const esRep1 = tipo === 'rep1';
+  if (!esRep1 && tipo !== 'rep9') return { ok: false, error: 'Reporte desconocido.' };
+  const sh = spreadsheet_().getSheetByName(esRep1 ? SHEETS.CACHE_REP1 : SHEETS.CACHE_REP9);
+  if (!sh || sh.getLastRow() < 5) return { ok: false, codigo: esRep1 ? 'SIN_REP1' : 'SIN_REP9', error: 'Todavía no hay un ' + (esRep1 ? 'Rep1' : 'Rep9') + ' cargado.' };
+  const n = esRep1 ? 9 : 30;
+  const filas = leerCache_(sh, n).map(r => r.map(c => {
+    if (Object.prototype.toString.call(c) === '[object Date]') return fechaKeyDeHoja_(c) || '';
+    return (c === null || c === undefined) ? '' : c;
+  }));
+  return { ok: true, tipo: tipo, encabezados: esRep1 ? REP1_HEADERS : REP9_HEADERS, filas: filas, corte: leerCorteMeta_(sh) };
+}
+
+/** Historial de cargas (hoja Cortes), de la más reciente a la más antigua. */
+function leerCortes_(limite) {
+  const sh = spreadsheet_().getSheetByName(SHEETS.CORTES);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const n = Math.min(limite || 60, sh.getLastRow() - 1);
+  const ini = sh.getLastRow() - n + 1;
+  return sh.getRange(ini, 1, n, 10).getValues().map(r => {
+    let ts = r[2];
+    if (Object.prototype.toString.call(ts) === '[object Date]') ts = Utilities.formatDate(ts, TZ, 'yyyy-MM-dd HH:mm:ss');
+    return { corte: String(r[0] || ''), reporte: String(r[1] || ''), fechaHora: String(ts || '').replace(/^'/, ''), usuario: String(r[3] || ''),
+             archivo: String(r[4] || ''), filas: Number(r[5]) || 0, vencMin: fechaKeyDeHoja_(r[6]) || '', vencMax: fechaKeyDeHoja_(r[7]) || '',
+             rango: String(r[8] || ''), control: num_(r[9]) };
+  }).filter(c => c.corte).reverse();
+}

@@ -136,6 +136,21 @@ function calcularCola_() {
       moratoriosProy: round2_(moratoriosProy), ajustes: round2_(ajustes), total: total
     };
 
+    // Rastro: de dónde sale cada número (para la hoja de trabajo y el detalle del aviso).
+    const traza = {
+      rep1: { fecha: c.nominal, capital: round2_(capital), intereses: round2_(intereses), otros: round2_(otros), iva: round2_(iva), importe: round2_(importe) },
+      rep9: x9 ? {
+        moneda: moneda9, capVigente: round2_(num_(x9[REP9.CAP_VIGENTE])), capVencido: round2_(num_(x9[REP9.CAP_VENCIDO])),
+        intVencido: round2_(num_(x9[REP9.INT_VENCIDO])), ivaIntVencido: round2_(num_(x9[REP9.IVA_INT_VENCIDO])),
+        moratorios: round2_(num_(x9[REP9.MORATORIOS])), ivaMoratorios: round2_(num_(x9[REP9.IVA_MORATORIOS])),
+        morCont: round2_(num_(x9[REP9.MOR_CONT])), ivaMorCont: round2_(num_(x9[REP9.IVA_MOR_CONT])),
+        saldoVencido: round2_(num_(x9[REP9.SALDO_VENCIDO])), saldoTotal: round2_(num_(x9[REP9.SALDO_TOTAL]))
+      } : null,
+      primera: primera, aplicaVencido: !!(x9 && primera),
+      tasaContrato: tasaContrato, factor: factor, baseDias: BASE_DIAS_ANIO, base: baseEfectiva ? 'EFECTIVA' : 'NOMINAL',
+      fechaBase: base, corte9: c9.fechaKey, diasCrudos: diasProy, tasaEnCatalogo: !!tasaInfo
+    };
+
     // ─── Calendario del aviso ───
     const dh = habilesEntre_(hoy, c.pago);
     let estado, accion = null, programadaPara = null, nota = '';
@@ -188,7 +203,7 @@ function calcularCola_() {
       previo: reg.previo, vispera: reg.vispera, reenvios: reg.reenvios, ultimo: reg.ultimo,
       bloqueos: bloqueos, alertas: alertas, destinatarios: destinatarios, cuentaSTP: contacto ? contacto.stp : '',
       tasaContrato: tasaContrato, tasaMoratoria: tasaMoratoria, diasProy: Math.max(0, diasProy),
-      desglose: desglose, ajustes: ajustesAplicados, plantilla: tieneVencido ? 'B' : 'A',
+      desglose: desglose, traza: traza, ajustes: ajustesAplicados, plantilla: tieneVencido ? 'B' : 'A',
       sinRep9: !x9, sinTasa: !tasaInfo, multiCuota: lineasConVarias.has(linea), total: total
     };
   });

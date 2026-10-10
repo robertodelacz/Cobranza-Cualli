@@ -433,3 +433,7 @@ function getCartera() { return envolver_(() => armarCartera_()); }
 function getFichaCliente(linea) { return envolver_(() => armarFichaCliente_(linea)); }
 function calcularSaldoAFecha(linea, fecha) { return envolver_(() => calcularSaldoAFecha_(linea, String(fecha || ''))); }
 function getResumenInicio() { return envolver_(() => armarResumenInicio_()); }
+function getHojaTrabajo() { return envolver_(() => armarHojaTrabajo_()); }
+function getSaldosVencidos() { return envolver_(() => armarSaldosVencidos_()); }
+function getReporteCargado(tipo) { return envolver_(() => leerReporteCargado_(tipo)); }
+function getCortes() { return envolver_(() => ({ ok: true, cortes: leerCortes_(80), catalogos: { tasas: leerTasas_().size, correos: leerContactos_().size } })); }
