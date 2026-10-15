@@ -28,10 +28,10 @@ const SHEETS = {
 // Parámetros nuevos de la v2. inicializarV2() los agrega a Config SOLO si no existen.
 const CONFIG_DEFAULTS = [
   ['TANDA_DIAS_HABILES', 1, 'Cada cuántos días hábiles se descarga un Rep1 nuevo (1 = todos los días hábiles).'],
-  ['TANDA_ANCHOR_FECHA', '', 'Fecha aaaa-mm-dd de un día hábil en que empezó una tanda. Solo aplica si TANDA_DIAS_HABILES es mayor a 1.'],
+  ['TANDA_ANCHOR_FECHA', '', 'Fecha aaaa-mm-dd de un día hábil en que se descargó el Rep1. Solo aplica si el Rep1 se descarga cada más de un día hábil.'],
   ['BASE_MORATORIOS', 'NOMINAL', 'Hasta qué fecha se proyectan los moratorios: NOMINAL (fecha del Rep1) o EFECTIVA (día hábil de pago).'],
   ['MAX_EDAD_REP9_DIAS_HABILES', 0, 'Antigüedad máxima del Rep9 para poder enviar, en días hábiles (0 = debe ser de hoy).'],
-  ['MAX_EDAD_REP1_DIAS_HABILES', '', 'Antigüedad máxima del Rep1 en días hábiles. Vacío = TANDA_DIAS_HABILES - 1.'],
+  ['MAX_EDAD_REP1_DIAS_HABILES', '', 'Antigüedad máxima del Rep1 en días hábiles. Vacío = días entre descargas - 1.'],
   ['ENVIO_AUTOMATICO', false, 'TRUE = un trigger envía solo las cuotas LISTAS a HORA_ENVIO_AUTOMATICO. FALSE = solo se envía desde la plataforma.'],
   ['HORA_RECORDATORIO', 8, 'Hora (0-23) del recordatorio por Chat para descargar reportes.'],
   ['HORA_ESCALACION', 9, 'Hora (0-23) en que se avisa por Chat si todavía no se cargaron los reportes.'],

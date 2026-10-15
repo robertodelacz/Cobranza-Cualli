@@ -19,7 +19,7 @@ function inicializarV2() {
   } else reporte.push('Zona horaria de la hoja: ok (' + TZ + ')');
 
   // 2. Hojas con estructura propia
-  asegurarHoja_(ss, SHEETS.CACHE_REP1, 'CACHE — ÚLTIMO REP1 CARGADO (vencimientos de la tanda)', REP1_HEADERS, 4, reporte);
+  asegurarHoja_(ss, SHEETS.CACHE_REP1, 'CACHE — ÚLTIMO REP1 CARGADO (vencimientos del periodo)', REP1_HEADERS, 4, reporte);
   asegurarHoja_(ss, SHEETS.CACHE_REP9, 'CACHE — ÚLTIMO REP9 CARGADO (saldos de cartera)', REP9_HEADERS, 4, reporte);
   asegurarHoja_(ss, SHEETS.BITACORA, 'BITÁCORA DE ENVÍOS DE AVISOS DE COBRANZA', BITACORA_HEADERS, 2, reporte);
   asegurarHoja_(ss, SHEETS.CORTES, null, ['Corte', 'Reporte', 'Fecha y hora de carga', 'Cargado por', 'Archivo', 'Filas', 'Vencimiento mín.', 'Vencimiento máx.', 'Rango declarado', 'Control (Importe / Saldo total)'], 1, reporte);
@@ -48,7 +48,7 @@ function inicializarV2() {
     // Descripciones de parámetros heredados de la v1 cuyo significado cambió o que ya no se usan
     const DESC = {
       MODO_PRUEBA: 'TRUE = todos los correos llegan al buzón de prueba (MODO_PRUEBA_DESTINO) con prefijo [PRUEBA] y no consumen avisos reales. Permite fecha simulada.',
-      VENTANA_DIAS_AVISO: 'Ya no se usa en la v2: la ventana la calcula la tanda con días hábiles.',
+      VENTANA_DIAS_AVISO: 'Ya no se usa en la v2: la ventana se calcula con días hábiles.',
       DIAS_TIPO_T_CERO: 'Ya no se usa en la v2: el día del vencimiento no sale aviso.',
       HORA_TRIGGER_DIARIO: 'Ya no se usa en la v2: las horas se definen en HORA_RECORDATORIO, HORA_ESCALACION y HORA_ENVIO_AUTOMATICO.'
     };

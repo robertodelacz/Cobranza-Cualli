@@ -140,7 +140,7 @@ function pintarCtx() {
   const e = S.estado; if (!e) return;
   const t = e.tanda;
   $('#ctx-fecha').textContent = dLargaAnio(t.hoy);
-  $('#ctx-tanda').textContent = t.esHabil ? 'Esta tanda cubre vencimientos del ' + dma(t.ventana.nominalDesde) + ' al ' + dma(t.ventana.nominalHasta) : 'Hoy es ' + t.motivoInhabil.toLowerCase() + ': no sale ningún aviso';
+  $('#ctx-tanda').textContent = t.esHabil ? 'El Rep1 de hoy cubre vencimientos del ' + dma(t.ventana.nominalDesde) + ' al ' + dma(t.ventana.nominalHasta) : 'Hoy es ' + t.motivoInhabil.toLowerCase() + ': no sale ningún aviso';
   $('#ctx-reportes').innerHTML = ['rep1', 'rep9'].map(tp => {
     const c = e.cortes[tp], st = estadoReporte(tp);
     const txt = st === 'falta' ? 'sin cargar' : (st === 'vencido' ? 'vencido, ' : '') + cuandoTxt(c.fechaHora);
@@ -210,7 +210,7 @@ async function cargarCola(silencioso) {
 function textoHeroe() {
   const e = S.estado, t = e.tanda, v = t.ventana;
   const r1 = estadoReporte('rep1'), r9 = estadoReporte('rep9');
-  if (!t.esHabil) return { h: 'Hoy es ' + t.motivoInhabil.toLowerCase() + '. No sale ningún aviso.', s: 'La siguiente tanda empieza el ' + dLarga(t.d0) + '.' };
+  if (!t.esHabil) return { h: 'Hoy es ' + t.motivoInhabil.toLowerCase() + '. No sale ningún aviso.', s: 'La próxima descarga de reportes es el ' + dLarga(t.d0) + '.' };
   const rango = 'vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta);
   if (r1 === 'ok' && r9 === 'ok' && S.cola && S.cola.ok) {
     const g = grupos(), n = g.listos.length, aten = g.revisar.length + g.bloqueadas.length;
@@ -248,7 +248,7 @@ function reglaHTML(t) {
     return '<div class="dia ' + (d.habil ? '' : 'inhabil ') + (d.enRep1 ? 'cubre ' : '') + (d.esHoy ? 'hoy' : '') + '">' + marca + '<span class="dow">' + DOW[d.dow] + '</span><span class="dnum">' + Number(d.fecha.slice(8)) + '</span><span class="mes">' + mes + '</span>' + pie + '</div>';
   }).join('');
   return '<div class="regla" style="--n:' + t.linea.length + '" role="img" aria-label="Próximos días hábiles">' + celdas + '</div>' +
-    '<div class="leyenda"><span><i class="h"></i>Hoy</span><span><i></i>Vencimientos que cubre el Rep1 de esta tanda</span><span><i class="raya"></i>Fin de semana o inhábil: no cuenta</span></div>' +
+    '<div class="leyenda"><span><i class="h"></i>Hoy</span><span><i></i>Vencimientos que cubre el Rep1 de hoy</span><span><i class="raya"></i>Fin de semana o inhábil: no cuenta</span></div>' +
     '<p class="nota" style="margin-top:6px">Un pago que cae en día inhábil se avisa y se cobra el siguiente día hábil.</p>';
 }
 
@@ -258,7 +258,7 @@ function kpisHoyHTML() {
   const tot = montoPrincipal(it, i => i.total), cap = montoPrincipal(it, i => i.desglose.capVencido), mor = montoPrincipal(it, i => i.desglose.moratoriosAcum + i.desglose.moratoriosProy);
   const conVenc = it.filter(i => i.desglose.capVencido > 0.005).length;
   return '<div class="kpis">' +
-    '<div class="kpi dest"><div class="t">Por cobrar en la tanda</div><div class="v">' + tot.v + '</div><div class="m">' + pl(it.length, 'cuota', 'cuotas') + (tot.extra ? ', ' + esc(tot.extra) : '') + '</div></div>' +
+    '<div class="kpi dest"><div class="t">Por cobrar en el periodo</div><div class="v">' + tot.v + '</div><div class="m">' + pl(it.length, 'cuota', 'cuotas') + (tot.extra ? ', ' + esc(tot.extra) : '') + '</div></div>' +
     '<div class="kpi"><div class="t">Capital vencido incluido</div><div class="v ' + (conVenc ? 'rojo' : '') + '">' + cap.v + '</div><div class="m">' + pl(conVenc, 'cliente', 'clientes') + ' con atraso' + (cap.extra ? ', ' + esc(cap.extra) : '') + '</div></div>' +
     '<div class="kpi"><div class="t">Moratorios incluidos</div><div class="v">' + mor.v + '</div><div class="m">Acumulados más los del periodo</div></div>' +
     '<div class="kpi"><div class="t">Avisos por enviar hoy</div><div class="v">' + hoyList.length + '</div><div class="m">' + (g.revisar.length + g.bloqueadas.length ? pl(g.revisar.length + g.bloqueadas.length, 'necesita atención', 'necesitan atención') : 'Ninguno con observaciones') + '</div></div></div>';
@@ -303,7 +303,7 @@ function pintarHoy() {
   raiz.innerHTML =
     '<div class="panel brief"><h1>' + esc(tx.h) + '</h1><p class="sub">' + esc(tx.s) + '</p>' +
     (acc ? '<div class="brief-acc">' + acc + '</div>' : '') + '<div class="recorrido">' + rec + '</div>' +
-    '<div class="calendario"><h3>Calendario de la tanda</h3>' + reglaHTML(t) + avisoHoyTxt(t) + '</div></div>' +
+    '<div class="calendario"><h3>Calendario de avisos</h3>' + reglaHTML(t) + avisoHoyTxt(t) + '</div></div>' +
     '<div style="height:18px"></div>' + kpisHoyHTML() +
     '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
     '<div class="dos-col">' + pendientesHTML() + carteraResumenHTML() + '</div>' + guiaHTML();
@@ -519,7 +519,7 @@ function pintarReportes() {
   const raiz = $('#v-reportes'), c = S.cortes, v = S.estado.tanda.ventana;
   const cat = c && c.ok ? c.catalogos : null;
   raiz.innerHTML =
-    '<div class="titulo-pag"><div><h2>Cargar reportes</h2><p class="para">Aquí subes los dos reportes del día. Se revisan solos y se guardan.</p><p class="lead">Cada reporte va en su propia tarjeta. Para esta tanda, el Rep1 va de vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta) + ' y el Rep9 con corte de hoy.</p></div></div>' +
+    '<div class="titulo-pag"><div><h2>Cargar reportes</h2><p class="para">Aquí subes los dos reportes del día. Se revisan solos y se guardan.</p><p class="lead">Cada reporte va en su propia tarjeta. Hoy, el Rep1 va de vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta) + ' y el Rep9 con corte de hoy.</p></div></div>' +
     '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
     '<div class="panel"><div class="panel-cab"><div><h3>Historial de cargas</h3><p>Cada archivo que se subió, quién lo hizo y cuándo</p></div></div>' +
     (c && c.ok && c.cortes.length ? '<div class="tabla-wrap" style="border:0;border-radius:0;max-height:420px"><table class="tabla"><thead><tr><th>Reporte</th><th>Fecha y hora</th><th>Cargado por</th><th>Archivo</th><th class="der">Filas</th><th class="oculta-m">Vencimientos</th><th class="der oculta-m">Control</th></tr></thead><tbody>' +
@@ -981,7 +981,7 @@ function pintarCartera() {
     (lista.length ? '<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cliente</th><th class="der">Saldo total</th><th class="der">Vencido</th><th class="oculta-m">Próxima cuota</th><th></th></tr></thead><tbody>' +
       lista.slice(0, S.mostrarCartera).map(l => '<tr class="clic" data-linea="' + esc(l.linea) + '"><td><div class="quien"><b title="' + esc(l.cliente) + '">' + esc(l.cliente) + '</b><small>Línea ' + esc(l.linea) + (l.tieneCorreo && l.tieneStp && l.tieneTasa ? '' : ', faltan datos') + '</small></div></td>' +
         '<td class="der monto num">' + dinero(l.saldoTotal, l.moneda) + '</td><td class="der monto num" style="' + (l.saldoVencido > 0.005 ? 'color:var(--ladrillo);font-weight:600' : 'color:var(--g500);font-weight:400') + '">' + (l.saldoVencido > 0.005 ? dinero(l.saldoVencido, l.moneda) : 'Al corriente') + '</td>' +
-        '<td class="oculta-m"><div class="cuando">' + (l.proxima ? 'Paga ' + dCorta(l.proxima.fechaPago) + ', ' + dinero(l.proxima.total, l.moneda) + '<small><span class="chip ' + CHIP_ESTADO[l.proxima.estado][0] + '">' + CHIP_ESTADO[l.proxima.estado][1] + '</span></small>' : '<span style="color:var(--g500)">Sin cuota en esta tanda</span>') + '</div></td><td class="der">' + FLECHA + '</td></tr>').join('') + '</tbody></table></div>'
+        '<td class="oculta-m"><div class="cuando">' + (l.proxima ? 'Paga ' + dCorta(l.proxima.fechaPago) + ', ' + dinero(l.proxima.total, l.moneda) + '<small><span class="chip ' + CHIP_ESTADO[l.proxima.estado][0] + '">' + CHIP_ESTADO[l.proxima.estado][1] + '</span></small>' : '<span style="color:var(--g500)">Sin cuota próxima</span>') + '</div></td><td class="der">' + FLECHA + '</td></tr>').join('') + '</tbody></table></div>'
       : '<div class="panel"><div class="vacio"><b>Sin resultados</b>Cambia el filtro o la búsqueda.</div></div>') +
     (lista.length > S.mostrarCartera ? '<div style="text-align:center;margin-top:16px"><button class="btn" data-mas>Mostrar más (' + (lista.length - S.mostrarCartera) + ' restantes)</button></div>' : '');
   $$('[data-fc]', raiz).forEach(b => b.addEventListener('click', () => { S.filtroCartera = b.dataset.fc; S.mostrarCartera = 80; pintarCartera(); }));
@@ -1178,12 +1178,12 @@ function pintarDatos() {
 const CONFIG_GRUPOS = [
   { t: 'Calendario de avisos', n: 'Cuándo se descargan los reportes y cuándo sale cada aviso.', p: [
     ['TANDA_DIAS_HABILES', 'Cada cuántos días hábiles se descarga un Rep1 nuevo', 'Con 1 se descarga todos los días hábiles.', 'num'],
-    ['TANDA_ANCHOR_FECHA', 'Fecha de arranque de las tandas', 'Solo cuando la tanda es de más de un día. Formato aaaa-mm-dd.', 'txt'],
+    ['TANDA_ANCHOR_FECHA', 'Fecha de arranque del ciclo de descarga', 'Solo cuando el Rep1 se descarga cada más de un día hábil. Formato aaaa-mm-dd.', 'txt'],
     ['DIAS_TIPO_T_MENOS_5', 'Primer aviso: días hábiles antes del pago', '', 'num'],
     ['DIAS_TIPO_T_MENOS_1', 'Segundo aviso: días hábiles antes del pago', '', 'num'],
     ['SEPARACION_MINIMA_DIAS', 'Separación mínima entre avisos, en días hábiles', 'Si el primer aviso salió hace menos, el segundo se omite.', 'num'],
     ['MAX_EDAD_REP9_DIAS_HABILES', 'Antigüedad máxima del Rep9', 'En días hábiles. Con 0 debe ser de hoy.', 'num'],
-    ['MAX_EDAD_REP1_DIAS_HABILES', 'Antigüedad máxima del Rep1', 'En días hábiles. Vacío usa la longitud de la tanda menos uno.', 'num']] },
+    ['MAX_EDAD_REP1_DIAS_HABILES', 'Antigüedad máxima del Rep1', 'En días hábiles. Vacío usa los días entre descargas menos uno.', 'num']] },
   { t: 'Cálculo de moratorios', n: '', p: [
     ['FACTOR_TASA_MORATORIA', 'Veces la tasa del contrato', 'La tasa moratoria es la del contrato multiplicada por este número.', 'num'],
     ['BASE_MORATORIOS', 'Hasta qué fecha se proyectan', 'NOMINAL usa la fecha de vencimiento del Rep1; EFECTIVA usa el día hábil de pago.', 'sel:NOMINAL,EFECTIVA']] },

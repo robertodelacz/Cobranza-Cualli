@@ -102,8 +102,8 @@ function validarReporte(tipo, rows, meta) {
       const max = validas.length ? validas.reduce((a, b) => a > b ? a : b) : null;
       const avisos = [];
       if (validas.length < keys.length) avisos.push({ nivel: 'warn', texto: (keys.length - validas.length) + ' fila(s) con fecha de vencimiento ilegible; se ignorarán.' });
-      if (max && max < addDays_(v.nominalHasta, -2)) avisos.push({ nivel: 'warn', texto: 'El archivo llega hasta el ' + fechaDMA_(max) + ' y esta tanda necesita hasta el ' + fechaDMA_(v.nominalHasta) + '. Confirma que el filtro del reporte fue el recomendado.' });
-      if (min && min > addDays_(v.nominalDesde, 2)) avisos.push({ nivel: 'warn', texto: 'El archivo empieza el ' + fechaDMA_(min) + ' y esta tanda necesita desde el ' + fechaDMA_(v.nominalDesde) + '.' });
+      if (max && max < addDays_(v.nominalHasta, -2)) avisos.push({ nivel: 'warn', texto: 'El archivo llega hasta el ' + fechaDMA_(max) + ' y el Rep1 de hoy necesita hasta el ' + fechaDMA_(v.nominalHasta) + '. Confirma que el filtro del reporte fue el recomendado.' });
+      if (min && min > addDays_(v.nominalDesde, 2)) avisos.push({ nivel: 'warn', texto: 'El archivo empieza el ' + fechaDMA_(min) + ' y el Rep1 de hoy necesita desde el ' + fechaDMA_(v.nominalDesde) + '.' });
       const fuera = validas.filter(k => k < v.nominalDesde || k > v.nominalHasta).length;
       if (fuera) avisos.push({ nivel: 'info', texto: fuera + ' cuota(s) quedan fuera del rango recomendado (' + fechaDMA_(v.nominalDesde) + ' a ' + fechaDMA_(v.nominalHasta) + ').' });
       const hoyOAntes = validas.filter(k => siguienteHabil_(k) <= hoy).length;

@@ -252,6 +252,11 @@ const shot = async (page, n, full) => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
     check('Móvil ' + v + ': sin scroll horizontal de la página', !overflow);
   }
+  // La palabra "tanda" no debe verse en ninguna pantalla
+  for (const v of ['hoy', 'reportes', 'avisos', 'hoja', 'cartera', 'historial', 'ajustes', 'datos', 'config']) {
+    await page.evaluate(x => irA(x), v); await page.waitForTimeout(500);
+    check('Sin la palabra "tanda" en ' + v, !/tanda/i.test(await page.innerText('body')));
+  }
   check('Sin errores de consola ni de JavaScript', errs.length === 0, errs.slice(0, 5).join(' | '));
   console.log(log.join('\n'));
   await browser.close();

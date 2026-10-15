@@ -58,7 +58,7 @@ function recordatorioDescarga() {
       '• *Rep9* con corte de hoy (' + fechaChat_(t.hoy) + ').\n' +
       'Cárgalos en la plataforma' + (url ? ': ' + url : '.');
   } else if (cfgNum_('MAX_EDAD_REP9_DIAS_HABILES', 0) === 0) {
-    msg = '*Hoy no inicia tanda, pero falta el Rep9 con corte de hoy* (' + fechaChat_(t.hoy) + ').' + (url ? '\n' + url : '');
+    msg = '*Hoy no toca descargar el Rep1, pero falta el Rep9 con corte de hoy* (' + fechaChat_(t.hoy) + ').' + (url ? '\n' + url : '');
   } else return;
   chatEnviar_(msg, true);
 }
