@@ -3,7 +3,7 @@
 Plataforma de avisos de pago (aviso 1 a 5 días hábiles y aviso 2 a 1 día hábil del pago). Sigue siendo Apps Script + Google Sheets (libro "Maestro"), pero ahora trabaja por **tandas**, con bitácora, reenvío, ajustes de saldo, avisos en Chat y roles.
 
 ## Cómo funciona (resumen)
-Nueve secciones en el menú lateral, en lenguaje de todos los días (diseño con el logo de Cualli, amarillo y grises):
+Nueve secciones en el menú lateral (cada una con su descripción corta; en Inicio hay una guía "¿Qué hace cada sección?"). Nombres: **Inicio, Cargar reportes, Enviar avisos, Hoja de trabajo, Cartera de clientes, Avisos enviados, Pagos y ajustes, Datos faltantes, Configuración**. En lenguaje de todos los días (diseño con el logo de Cualli, amarillo y grises):
 1. **Hoy** es una guía de tres pasos: *Sube los reportes → Revisa lo pendiente → Envía los avisos*. Incluye la regla de días hábiles (a quién se avisa hoy), cifras de la tanda, las **dos tarjetas de carga** y un resumen de cartera. Un vencimiento en sábado, domingo o inhábil CNBV se paga y se avisa el siguiente día hábil (el correo dice esa fecha).
 2. **Reportes**: **una tarjeta para el Rep1 y otra para el Rep9**, cada una con su zona de arrastre, el filtro que hay que usar al descargar (con botón de copiar las fechas), estado "al día / vencido", **Ver contenido** del archivo guardado (con búsqueda y descarga a Excel) e historial de todas las cargas. Sin casillas: el archivo se revisa solo y se guarda; solo se detiene, con un botón claro, si ve algo raro. Si se suelta un Rep9 en la tarjeta del Rep1 (o al revés), lo avisa y ofrece *Usarlo como Rep9*.
 3. **Avisos**: *Listos para enviar* (ya marcados), *Revisa antes de enviar*, *No se pueden enviar todavía* (con el botón que lo resuelve), *Más adelante* y *Ya atendidos*. Al tocar una fila se abre **"la cinta"**: el cálculo del monto línea por línea, con la columna del reporte de donde sale cada número (Rep1 col. D, Rep9 col. K, P+Q, R+S+T+U…), la fórmula de los moratorios y el total que lleva el correo; también la vista previa del correo. Barra fija al fondo para enviar lo seleccionado.
@@ -23,6 +23,9 @@ Nueve secciones en el menú lateral, en lenguaje de todos los días (diseño con
 6. Primera semana: `MODO_PRUEBA = TRUE` y `MODO_PRUEBA_DESTINO` con un buzón interno; los correos no llegan a clientes ni consumen avisos. Después ponlo en FALSE.
 7. Implementar → Nueva versión de la aplicación web (ejecutar como tú, acceso dominio).
 
+## Si algo marca "… is not defined"
+Significa que algún archivo del proyecto de Apps Script es de una versión anterior (por ejemplo, el `Email.gs` de la v1 define `construirCorreoAviso`, no `construirCorreo_`). La plataforma lo detecta y muestra un aviso rojo arriba con el nombre del archivo; también puedes ejecutar **`verificarInstalacion`** en el editor. Solución: copiar el `.gs` completo del repositorio, guardar y publicar una nueva versión de la aplicación web.
+
 ## Supuestos que conviene confirmar
 - **Cadencia de tanda**: por defecto una tanda por día hábil (`TANDA_DIAS_HABILES=1`). Si la gerencia prefiere descargar cada 2 o 3 días hábiles, se cambia ese parámetro y la ventana se recalcula.
 - **Moratorios**: se proyectan con fecha nominal (como el motor v1): capital vencido × tasa contrato × 2 ÷ 360 × días desde el corte del Rep9 al vencimiento. Parámetro `BASE_MORATORIOS` (NOMINAL / EFECTIVA). Validar con Finanzas.
@@ -36,4 +39,4 @@ Nueve secciones en el menú lateral, en lenguaje de todos los días (diseño con
 - El envío es manual con selección; el envío automático existe (`ENVIO_AUTOMATICO`) pero está apagado.
 
 ## Pruebas incluidas (carpeta `pruebas/` (necesitan `maestro.json`, un volcado del libro, que no se versiona))
-102 pruebas de Node contra los datos reales del libro (calendario, motor, flujo de envío, ajustes, Chat, roles, cartera, ficha de cliente y hoja de trabajo/traza del cálculo) y una prueba de interfaz con Playwright (43 verificaciones: dos cargas separadas y reporte en tarjeta equivocada, enviar, cinta, hoja de trabajo con sus totales, cartera, historial, ajustes, móvil). No se despliegan en Apps Script.
+106 pruebas de Node contra los datos reales del libro (calendario, motor, flujo de envío, ajustes, Chat, roles, cartera, ficha de cliente y hoja de trabajo/traza del cálculo) y una prueba de interfaz con Playwright (47 verificaciones: dos cargas separadas y reporte en tarjeta equivocada, enviar, cinta, hoja de trabajo con sus totales, cartera, historial, ajustes, móvil). No se despliegan en Apps Script.

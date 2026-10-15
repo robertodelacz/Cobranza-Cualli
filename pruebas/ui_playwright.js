@@ -60,6 +60,10 @@ const shot = async (page, n, full) => {
   check('Hoy: regla de días con 10 o más celdas', (await page.$$('.regla .dia')).length >= 10);
   check('Hoy: hay dos tarjetas de carga, una por reporte', (await page.$$('#v-hoy .carga-card')).length === 2 && !!(await page.$('[data-archivo="rep1"]')) && !!(await page.$('[data-archivo="rep9"]')));
   check('Hoy: no hay casillas para palomear en la carga', (await page.$$('#v-hoy input[type=checkbox]')).length === 0);
+  check('Menú: cada sección trae su descripción corta', (await page.$$('.nav-item .nav-txt small')).length === 9);
+  check('Hoy: guía "¿Qué hace cada sección?" con 8 secciones', (await page.$$('.guia .guia-item')).length === 8);
+  check('Hoy: los tres pasos llevan a su sección', (await page.$$('#v-hoy button.rec[data-ir]')).length === 3);
+  check('Instalación: sin avisos de archivos desactualizados en el entorno de prueba', (await page.$$('#banners .banner.error')).length === 0);
   check('Logo de Cualli presente (imagen o letra de respaldo)', !!(await page.$('.lado-marca .logo-tile img, .lado-marca .logo-tile .logo-c')));
 
   // ── Archivo en la tarjeta equivocada: se avisa y se ofrece usarlo como lo que es

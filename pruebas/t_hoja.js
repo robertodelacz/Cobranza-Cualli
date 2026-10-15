@@ -49,4 +49,20 @@ t('reporte cargado: Rep9 trae 30 columnas', () => { assert.ok(r9.ok); assert.str
 t('reporte cargado: tipo inválido da error', () => assert.strictEqual(m.plain(m.run(`getReporteCargado('x')`)).ok, false));
 const ct = m.plain(m.run('getCortes()'));
 t('cortes: quedan las dos cargas, la más reciente primero', () => { assert.ok(ct.ok, ct.error); assert.ok(ct.cortes.length >= 2); assert.ok(ct.cortes.some(c => c.reporte === 'Rep1' && c.archivo === 'Rep1.xlsx')); assert.ok(ct.cortes.some(c => c.reporte === 'Rep9' && c.filas > 100)); });
+
+// ── Instalación: detectar archivos de la versión anterior (p. ej. el Email.gs de la v1)
+t('instalación: con todos los archivos nuevos no hay nada por reemplazar', () => { const r = m.plain(m.run('archivosDesactualizados_()')); assert.deepStrictEqual(r, []); assert.ok(m.plain(m.run('getEstadoInicial()')).archivosDesactualizados.length === 0); });
+t('instalación: si falta construirCorreo_ (Email.gs viejo) lo dice con el nombre del archivo', () => {
+  m.run('var __guardada = construirCorreo_; construirCorreo_ = undefined;');
+  try {
+    const r = m.plain(m.run('archivosDesactualizados_()')); assert.deepStrictEqual(r.map(x => x.archivo), ['Email']);
+    assert.strictEqual(m.plain(m.run('getEstadoInicial()')).archivosDesactualizados[0].funcion, 'construirCorreo_');
+  } finally { m.run('construirCorreo_ = __guardada;'); }
+  assert.deepStrictEqual(m.plain(m.run('archivosDesactualizados_()')), []);
+});
+t('un "is not defined" de Apps Script se traduce a un mensaje entendible', () => {
+  const p = m.plain(m.run('envolver_(() => { return funcionQueNoExiste_(); })'));
+  assert.strictEqual(p.ok, false); assert.strictEqual(p.codigo, 'ARCHIVO_DESACTUALIZADO'); assert.ok(/funcionQueNoExiste_/.test(p.error) && !/is not defined/.test(p.error));
+});
+t('instalación: verificarInstalacion() responde en lenguaje claro', () => { assert.ok(/versión nueva/.test(m.run('verificarInstalacion()'))); });
 console.log(ok + ' pruebas');

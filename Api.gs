@@ -17,7 +17,40 @@ function doGet(e) {
 function include(filename) { return HtmlService.createHtmlOutputFromFile(filename).getContent(); }
 
 function envolver_(fn) {
-  try { return fn(); } catch (err) { return { ok: false, error: String(err && err.message ? err.message : err) }; }
+  try { return fn(); } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    const falta = msg.match(/^(\w+) is not defined/);
+    if (falta) return { ok: false, codigo: 'ARCHIVO_DESACTUALIZADO', error: 'Al proyecto de Apps Script le falta la función "' + falta[1] + '": alguno de sus archivos es de una versión anterior. Revisa el aviso rojo de la parte superior para ver cuál.' };
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * ¿Cada archivo del proyecto es de la versión nueva? Se revisa una función "centinela" por archivo.
+ * (typeof no falla aunque el nombre no exista.) Devuelve la lista de archivos que hay que reemplazar.
+ */
+function archivosDesactualizados_() {
+  const centinelas = [
+    ['Config', () => typeof cfg_ === 'function' && typeof VERSION === 'string', 'cfg_'],
+    ['Calendario', () => typeof cargarCalendario_ === 'function', 'cargarCalendario_'],
+    ['Tandas', () => typeof longitudTanda_ === 'function', 'longitudTanda_'],
+    ['Datos', () => typeof round2_ === 'function', 'round2_'],
+    ['Motor', () => typeof calcularCola_ === 'function', 'calcularCola_'],
+    ['Cartera', () => typeof armarHojaTrabajo_ === 'function', 'armarHojaTrabajo_'],
+    ['Email', () => typeof construirCorreo_ === 'function', 'construirCorreo_'],
+    ['Sender', () => typeof previsualizar_ === 'function', 'previsualizar_'],
+    ['Chat', () => typeof chatEnviar_ === 'function', 'chatEnviar_'],
+    ['Setup', () => typeof inicializarV2 === 'function', 'inicializarV2']
+  ];
+  return centinelas.filter(c => { try { return !c[1](); } catch (e) { return true; } }).map(c => ({ archivo: c[0], funcion: c[2] }));
+}
+
+/** Para correr desde el editor de Apps Script: dice qué archivos faltan o son de la versión anterior. */
+function verificarInstalacion() {
+  const m = archivosDesactualizados_();
+  const txt = m.length ? 'Archivos por reemplazar: ' + m.map(x => x.archivo + ' (falta ' + x.funcion + ')').join(', ') + '. Copia el archivo .gs del repositorio, guarda y publica una nueva versión.' : 'Todos los archivos están en la versión nueva.';
+  console.log(txt);
+  return txt;
 }
 
 function conCandado_(fn) {
@@ -45,7 +78,8 @@ function getEstadoInicial() {
       cortes: cortes,
       chatConfigurado: !!webhookChat_(), triggers: triggers,
       modoPrueba: cfgBool_('MODO_PRUEBA', false), fechaSimulada: fechaSimulada_(),
-      inicializado: !!(sh1 && sh9 && ss.getSheetByName(SHEETS.CORTES))
+      inicializado: !!(sh1 && sh9 && ss.getSheetByName(SHEETS.CORTES)),
+      archivosDesactualizados: archivosDesactualizados_()
     };
   });
 }

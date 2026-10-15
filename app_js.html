@@ -153,6 +153,9 @@ function pintarBanners() {
   const e = S.estado, b = [];
   if (!e.inicializado) b.push('<div class="banner error">' + ico('error') + '<span>Falta preparar el libro Maestro. En Apps Script ejecuta <b>inicializarV2</b> una vez y recarga esta página.</span></div>');
   if (e.modoPrueba) b.push('<div class="banner prueba"><span>Modo prueba: los correos llegan a un buzón interno y no cuentan como avisos reales.' + (e.fechaSimulada ? ' Fecha simulada: ' + dLargaAnio(e.fechaSimulada) + '.' : '') + '</span></div>');
+  if (e.archivosDesactualizados && e.archivosDesactualizados.length) {
+    e.archivosDesactualizados.forEach(a => b.push('<div class="banner error">' + ico('error') + '<span>El archivo <b>' + esc(a.archivo) + '</b> del proyecto de Apps Script es de una versión anterior (le falta <b>' + esc(a.funcion) + '</b>). Reemplázalo con <b>' + esc(a.archivo) + '.gs</b> del repositorio, guarda y publica una nueva versión de la aplicación web.</span></div>'));
+  }
   if (e.usuario.rol === 'SIN_ACCESO') b.push('<div class="banner error"><span>Tu cuenta (' + esc(e.usuario.email) + ') no está en la hoja Usuarios. Pide acceso al administrador.</span></div>');
   else if (e.usuario.abierto) b.push('<div class="banner">' + ico('warn') + '<span>La hoja Usuarios está vacía, así que todas las cuentas del dominio son administradoras. Agrega usuarios con su rol para limitar el acceso.</span></div>');
   if (e.usuario.rol === 'AUDITORIA') b.push('<div class="banner"><span>Tienes acceso de solo consulta.</span></div>');
@@ -264,7 +267,7 @@ function kpisHoyHTML() {
 function pendientesHTML() {
   if (!(S.cola && S.cola.ok)) return '';
   const g = grupos(), lista = g.bloqueadas.concat(g.revisar);
-  const cab = '<div class="panel-cab"><div><h3>Necesita tu atención</h3><p>' + (lista.length ? pl(lista.length, 'aviso', 'avisos') + ' con un dato faltante u observación' : 'Nada pendiente por ahora') + '</p></div>' + (lista.length ? '<button class="btn chico" data-ir="avisos">Ver en Avisos</button>' : '') + '</div>';
+  const cab = '<div class="panel-cab"><div><h3>Necesita tu atención</h3><p>' + (lista.length ? pl(lista.length, 'aviso', 'avisos') + ' con un dato faltante u observación' : 'Nada pendiente por ahora') + '</p></div>' + (lista.length ? '<button class="btn chico" data-ir="avisos">Ir a Enviar avisos</button>' : '') + '</div>';
   if (!lista.length) return '<div class="panel">' + cab + '<div class="vacio" style="padding:30px"><b>Todo en orden</b>Los avisos de hoy no tienen observaciones.</div></div>';
   return '<div class="panel">' + cab + '<div class="tabla-wrap" style="border:0;border-radius:0"><table class="tabla"><tbody>' + lista.slice(0, 6).map(i =>
     '<tr class="clic" data-cuota="' + esc(i.key) + '"><td>' + (i.estado === 'BLOQUEADA' ? ico('error') : ico('warn')) + '</td><td><div class="quien"><b>' + esc(i.cliente) + '</b><small>Línea ' + esc(i.linea) + '</small></div></td><td class="motivo">' + esc(motivos(i)[0] || '') + '</td></tr>').join('') +
@@ -273,7 +276,7 @@ function pendientesHTML() {
 
 function carteraResumenHTML() {
   const R = S.resumen && S.resumen.ok && S.resumen.hayRep9 ? S.resumen : null;
-  const cab = '<div class="panel-cab"><div><h3>Cartera</h3><p>Según el Rep9 cargado</p></div><button class="btn chico" data-ir="cartera">Ver cartera</button></div>';
+  const cab = '<div class="panel-cab"><div><h3>Cartera</h3><p>Según el Rep9 cargado</p></div><button class="btn chico" data-ir="cartera">Ver cartera de clientes</button></div>';
   if (!R) return '<div class="panel">' + cab + '<div class="vacio" style="padding:30px">Sube el Rep9 para ver la cartera.</div></div>';
   const monedas = Object.keys(R.cartera).sort();
   return '<div class="panel">' + cab + '<div class="panel-cuerpo"><div class="cc-datos">' + monedas.map(m =>
@@ -289,13 +292,13 @@ function pintarHoy() {
   const g = grupos(), colaOk = !!(S.cola && S.cola.ok && reportesOk), aten = g.revisar.length + g.bloqueadas.length;
   let acc = '';
   if (colaOk && g.listos.length && can('enviar')) acc = '<button class="btn principal grande" data-enviar-listos>' + icoI('enviar') + 'Enviar ' + pl(g.listos.length, 'aviso', 'avisos') + '</button><button class="btn grande" data-ir="avisos">Revisar la lista</button>';
-  else if (!reportesOk && can('cargar')) acc = '<button class="btn principal grande" data-ir="reportes">' + icoI('reportes') + 'Subir los reportes</button>';
+  else if (!reportesOk && can('cargar')) acc = '<button class="btn principal grande" data-ir="reportes">' + icoI('reportes') + 'Cargar los reportes</button>';
   else if (aten) acc = '<button class="btn oscuro grande" data-ir="avisos">Ver lo que necesita atención</button>';
   const rec = [
-    ['Reportes al día', reportesOk ? 'hecho' : 'activo'],
-    ['Pendientes revisados', !colaOk ? 'espera' : aten ? 'activo' : 'hecho'],
-    ['Avisos enviados', !colaOk ? 'espera' : g.listos.length ? 'activo' : 'hecho']
-  ].map(r => '<span class="rec ' + r[1] + '">' + ico(r[1] === 'hecho' ? 'ok' : r[1] === 'activo' ? 'actual' : 'vacio') + r[0] + '</span>').join('');
+    ['1', 'Cargar reportes', 'reportes', reportesOk ? 'hecho' : 'activo'],
+    ['2', 'Revisar pendientes', 'avisos', !colaOk ? 'espera' : aten ? 'activo' : 'hecho'],
+    ['3', 'Enviar avisos', 'avisos', !colaOk ? 'espera' : g.listos.length ? 'activo' : 'hecho']
+  ].map(r => '<button class="rec ' + r[3] + '" data-ir="' + r[2] + '" title="Ir a ' + r[1] + '">' + ico(r[3] === 'hecho' ? 'ok' : r[3] === 'activo' ? 'actual' : 'vacio') + r[0] + '. ' + r[1] + '</button>').join('');
 
   raiz.innerHTML =
     '<div class="panel brief"><h1>' + esc(tx.h) + '</h1><p class="sub">' + esc(tx.s) + '</p>' +
@@ -303,10 +306,19 @@ function pintarHoy() {
     '<div class="calendario"><h3>Calendario de la tanda</h3>' + reglaHTML(t) + avisoHoyTxt(t) + '</div></div>' +
     '<div style="height:18px"></div>' + kpisHoyHTML() +
     '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
-    '<div class="dos-col">' + pendientesHTML() + carteraResumenHTML() + '</div>';
+    '<div class="dos-col">' + pendientesHTML() + carteraResumenHTML() + '</div>' + guiaHTML();
   enlazarGeneral(raiz); enlazarCargas(raiz);
   const en = $('[data-enviar-listos]', raiz); if (en) en.addEventListener('click', () => confirmarEnvio(grupos().listos.map(i => i.key)));
   contadores();
+}
+
+
+/* ─── Guía de secciones (qué hace cada módulo) ─────────────────────────── */
+const GUIA = {"reportes": {"n": "Cargar reportes", "p": "Aquí subes los dos reportes del día. Se revisan solos y se guardan."}, "avisos": {"n": "Enviar avisos", "p": "Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía."}, "hoja": {"n": "Hoja de trabajo", "p": "La hoja de cálculo de siempre, dentro de la plataforma: ve cómo sale el saldo a pagar de cada cuota."}, "cartera": {"n": "Cartera de clientes", "p": "Todas las líneas con su saldo, lo vencido y su próxima cuota."}, "historial": {"n": "Avisos enviados", "p": "Registro de cada correo enviado, con quién lo mandó. Aquí también se reenvía."}, "ajustes": {"n": "Pagos y ajustes", "p": "Si un cliente pagó o dispuso después de bajar el Rep9, regístralo aquí y el monto del aviso se corrige."}, "datos": {"n": "Datos faltantes", "p": "Clientes a los que les falta correo, cuenta STP o tasa para poder avisarles bien."}, "config": {"n": "Configuración", "p": "Cada cuántos días se descarga, a quién se copia, Chat, modo prueba y días inhábiles."}};
+function guiaHTML() {
+  const orden = ['reportes', 'avisos', 'hoja', 'cartera', 'historial', 'ajustes', 'datos', 'config'];
+  return '<div class="panel guia"><div class="panel-cab"><div><h3>¿Qué hace cada sección?</h3><p>Todas están en el menú de la izquierda. Toca una para entrar.</p></div></div><div class="guia-grid">' +
+    orden.map(k => '<button class="guia-item" data-ir="' + k + '"><span class="gi-ico">' + icoI(k) + '</span><span><b>' + GUIA[k].n + '</b><small>' + GUIA[k].p + '</small></span></button>').join('') + '</div></div>';
 }
 
 function enlazarGeneral(raiz) {
@@ -507,13 +519,13 @@ function pintarReportes() {
   const raiz = $('#v-reportes'), c = S.cortes, v = S.estado.tanda.ventana;
   const cat = c && c.ok ? c.catalogos : null;
   raiz.innerHTML =
-    '<div class="titulo-pag"><div><h2>Reportes</h2><p class="lead">Sube el Rep1 y el Rep9 del día, cada uno en su tarjeta. Se revisan solos y se guardan en cuanto están bien. Para esta tanda, el Rep1 va de vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta) + ' y el Rep9 con corte de hoy.</p></div></div>' +
+    '<div class="titulo-pag"><div><h2>Cargar reportes</h2><p class="para">Aquí subes los dos reportes del día. Se revisan solos y se guardan.</p><p class="lead">Cada reporte va en su propia tarjeta. Para esta tanda, el Rep1 va de vencimientos del ' + dma(v.nominalDesde) + ' al ' + dma(v.nominalHasta) + ' y el Rep9 con corte de hoy.</p></div></div>' +
     '<div class="cargas" data-cargas>' + tarjetaCarga('rep1') + tarjetaCarga('rep9') + '</div>' +
     '<div class="panel"><div class="panel-cab"><div><h3>Historial de cargas</h3><p>Cada archivo que se subió, quién lo hizo y cuándo</p></div></div>' +
     (c && c.ok && c.cortes.length ? '<div class="tabla-wrap" style="border:0;border-radius:0;max-height:420px"><table class="tabla"><thead><tr><th>Reporte</th><th>Fecha y hora</th><th>Cargado por</th><th>Archivo</th><th class="der">Filas</th><th class="oculta-m">Vencimientos</th><th class="der oculta-m">Control</th></tr></thead><tbody>' +
       c.cortes.map(x => '<tr><td><span class="chip ' + (x.reporte === 'Rep1' ? 'suave' : '') + '">' + esc(x.reporte) + '</span></td><td>' + esc(dma(fechaDe(x.fechaHora)) + ' ' + horaDe(x.fechaHora)) + '</td><td>' + esc((x.usuario || '').split('@')[0]) + '</td><td>' + esc(x.archivo || '—') + '</td><td class="der num">' + x.filas + '</td><td class="oculta-m">' + (x.vencMin ? dma(x.vencMin) + ' al ' + dma(x.vencMax) : '—') + '</td><td class="der num oculta-m">' + n2(x.control) + '</td></tr>').join('') + '</tbody></table></div>'
       : '<div class="vacio"><b>Todavía no hay cargas</b>Cuando subas un reporte quedará registrado aquí.</div>') + '</div>' +
-    '<div class="panel"><div class="panel-cab"><div><h3>Catálogos</h3><p>No vienen en los reportes; se mantienen en el libro Maestro</p></div><button class="btn chico" data-ir="datos">Ver datos de clientes</button></div>' +
+    '<div class="panel"><div class="panel-cab"><div><h3>Catálogos</h3><p>No vienen en los reportes; se mantienen en el libro Maestro</p></div><button class="btn chico" data-ir="datos">Ver datos faltantes</button></div>' +
     '<div class="panel-cuerpo"><div class="cc-datos"><div><b>' + (cat ? cat.tasas : '—') + '</b><span>contratos con tasa registrada</span></div><div><b>' + (cat ? cat.correos : '—') + '</b><span>contratos con correo y cuenta STP</span></div></div></div></div>';
   enlazarGeneral(raiz); enlazarCargas(raiz);
 }
@@ -539,7 +551,7 @@ function quienHTML(i) { return '<div class="quien"><b title="' + esc(i.cliente) 
 function pagaHTML(i) { return '<div class="cuando">Paga ' + dCorta(i.fechaPago) + (i.fechaPago !== i.fechaNominal ? '<small>vence ' + dCorta(i.fechaNominal) + ', día inhábil</small>' : '') + '</div>'; }
 function chipAviso(i) { return i.accion === 'PREVENTIVO' ? '<span class="chip suave">Primer aviso</span>' : i.accion === 'VISPERA' ? '<span class="chip amarillo">Segundo aviso</span>' : ''; }
 function grupoCab(icono, titulo, cuantos, extra) { return '<div class="grupo-cab">' + ico(icono) + '<h3>' + titulo + '</h3><span class="cuantos">' + cuantos + '</span><span class="espacio"></span>' + (extra || '') + '</div>'; }
-function vacioSinReportes(msg) { return '<div class="titulo-pag"><div><h2>Avisos de hoy</h2></div></div><div class="panel"><div class="vacio"><b>Todavía no hay avisos</b>' + esc(msg || 'Sube el Rep1 y el Rep9 para que la plataforma calcule los avisos de hoy.') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a subir los reportes</button></div></div></div>'; }
+function vacioSinReportes(msg) { return '<div class="titulo-pag"><div><h2>Enviar avisos</h2><p class="para">Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía.</p></div></div><div class="panel"><div class="vacio"><b>Todavía no hay avisos</b>' + esc(msg || 'Sube el Rep1 y el Rep9 para que la plataforma calcule los avisos de hoy.') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Cargar los reportes</button></div></div></div>'; }
 
 function pintarAvisos() {
   const raiz = $('#v-avisos');
@@ -556,9 +568,9 @@ function pintarAvisos() {
   const selec = g.listos.filter(i => !S.excl.has(i.key));
   const puedeEnviar = can('enviar');
 
-  let h = '<div class="titulo-pag"><div><h2>Avisos de hoy</h2><p class="lead">Calculados con el Rep1 de ' + esc(cuandoTxt(c.frescura.rep1.corte.fechaHora)) + ' y el Rep9 de ' + esc(cuandoTxt(c.frescura.rep9.corte.fechaHora)) + '. Toca una fila para ver cómo se construyó su monto.</p></div>' +
+  let h = '<div class="titulo-pag"><div><h2>Enviar avisos</h2><p class="para">Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía.</p><p class="lead">Calculados con el Rep1 de ' + esc(cuandoTxt(c.frescura.rep1.corte.fechaHora)) + ' y el Rep9 de ' + esc(cuandoTxt(c.frescura.rep9.corte.fechaHora)) + '. Toca una fila para ver cómo se construyó su monto.</p></div>' +
     '<div class="acciones-pag"><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div></div>';
-  if (caducos) h += '<div class="banner" style="margin-bottom:6px">' + ico('warn') + '<span>Los reportes ya no están al día, por eso no se puede enviar nada.</span><button class="btn chico" data-ir="reportes">Subir reportes</button></div>';
+  if (caducos) h += '<div class="banner" style="margin-bottom:6px">' + ico('warn') + '<span>Los reportes ya no están al día, por eso no se puede enviar nada.</span><button class="btn chico" data-ir="reportes">Cargar reportes</button></div>';
 
   h += '<div class="grupo" style="margin-top:6px">' + grupoCab('listo', 'Listos para enviar', g.listos.length ? pl(g.listos.length, 'aviso', 'avisos') + ', ' + montosTxt(g.listos) : '0 avisos',
     g.listos.length && puedeEnviar ? '<button class="btn texto chico" data-todos="' + (selec.length === g.listos.length ? 'no' : 'si') + '">' + (selec.length === g.listos.length ? 'Quitar todos' : 'Seleccionar todos') + '</button>' : '');
@@ -579,7 +591,7 @@ function pintarAvisos() {
       bloq.map(i => {
         const k = codigos(i);
         const boton = k.some(x => x === 'SIN_CORREO' || x === 'SIN_STP') ? '<button class="btn chico principal" data-datos="' + esc(i.linea) + '">Completar datos</button>'
-          : k.some(x => x === 'REP1_VENCIDO' || x === 'REP9_VENCIDO') ? '<button class="btn chico principal" data-ir="reportes">Subir reportes</button>'
+          : k.some(x => x === 'REP1_VENCIDO' || x === 'REP9_VENCIDO') ? '<button class="btn chico principal" data-ir="reportes">Cargar reportes</button>'
           : k.indexOf('AJUSTE_PENDIENTE') >= 0 ? '<button class="btn chico principal" data-ir="ajustes">Ver ajustes</button>' : '<button class="btn chico" data-ficha="' + esc(i.linea) + '">Ver cliente</button>';
         return '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + '.</b> ' + motivos(i).map(esc).join(' ') + '</td><td><div class="celda-acc">' + boton + '</div></td></tr>';
       }).join('') + '</tbody></table></div></div>';
@@ -749,7 +761,7 @@ async function enviarLote(keys, confirmarRevision) {
       (fallo ? '<p style="margin-top:12px;color:var(--ladrillo)">' + esc(fallo) + '</p>' : '') +
       (acum.pendientes.length && !fallo ? '<p style="margin-top:12px">Se acabó el tiempo o la cuota diaria de Google. Vuelve a enviar: lo que ya salió no se repite.</p>' : '') +
       (problemas.length ? '<ul class="resumen-lista">' + problemas.map(x => '<li><span><b>' + esc(x.cliente || x.key) + '</b></span><span style="text-align:right">' + esc(x.error) + '</span></li>').join('') + '</ul>' : ''),
-    pie: '<button class="btn" data-historial>Ver en el historial</button><button class="btn principal" data-cerrar>Listo</button>'
+    pie: '<button class="btn" data-historial>Ver en Avisos enviados</button><button class="btn principal" data-cerrar>Listo</button>'
   });
   $('[data-cerrar]', v2).addEventListener('click', cerrarModal);
   $('[data-historial]', v2).addEventListener('click', () => { cerrarModal(); irA('historial'); });
@@ -808,7 +820,7 @@ const SALDOS_COLS = [
 
 async function cargarHoja() {
   const raiz = $('#v-hoja');
-  if (!(S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado)) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2></div></div><div class="panel"><div class="vacio"><b>Falta cargar los reportes</b>La hoja se arma con el Rep1 y el Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a Reportes</button></div></div></div>'; enlazarGeneral(raiz); return; }
+  if (!(S.estado.cortes.rep1.cargado && S.estado.cortes.rep9.cargado)) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2><p class="para">La hoja de cálculo de siempre, dentro de la plataforma: ve cómo sale el saldo a pagar de cada cuota.</p></div></div><div class="panel"><div class="vacio"><b>Falta cargar los reportes</b>La hoja se arma con el Rep1 y el Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Cargar reportes</button></div></div></div>'; enlazarGeneral(raiz); return; }
   if (S.hojaTab === 'saldos') {
     if (!S.saldosV) { raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Armando la hoja…</div>'; S.saldosV = await api('getSaldosVencidos'); }
   } else if (!S.hoja) { raiz.innerHTML = '<div class="cargando"><span class="giro"></span>Armando la hoja…</div>'; S.hoja = await api('getHojaTrabajo'); }
@@ -819,7 +831,7 @@ function sumaCol(filas, k) { return Math.round(filas.reduce((a, f) => a + (Numbe
 
 function pintarHoja() {
   const raiz = $('#v-hoja'), tab = S.hojaTab;
-  const cab = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2><p class="lead">Aquí se ve cómo se construye cada monto: la cuota sale del Rep1, el saldo vencido del Rep9 y las columnas amarillas se calculan. Toca una fila para ver su cinta paso a paso.</p></div></div>' +
+  const cab = '<div class="titulo-pag"><div><h2>Hoja de trabajo</h2><p class="para">La hoja de cálculo de siempre, dentro de la plataforma: ve cómo sale el saldo a pagar de cada cuota.</p><p class="lead">La cuota sale del Rep1, lo vencido del Rep9 y las columnas amarillas se calculan. Toca una fila para ver su cinta paso a paso.</p></div></div>' +
     '<div class="pestanas" role="tablist">' + [['hoja', 'Cuotas del Rep1'], ['saldos', 'Saldos vencidos del Rep9'], ['formulas', 'Cómo se calcula']].map(t => '<button role="tab" aria-selected="' + (tab === t[0]) + '" data-tab="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
   let cuerpo = '';
   if (tab === 'hoja') cuerpo = hojaCuotasHTML();
@@ -944,7 +956,7 @@ const FLECHA = '<svg width="18" height="18" aria-hidden="true" style="color:var(
 async function cargarCartera() {
   const raiz = $('#v-cartera');
   if (!S.cartera) {
-    raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2></div></div><div class="cargando"><span class="giro"></span>Leyendo el Rep9…</div>';
+    raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera de clientes</h2><p class="para">Todas las líneas con su saldo, lo vencido y su próxima cuota.</p></div></div><div class="cargando"><span class="giro"></span>Leyendo el Rep9…</div>';
     S.cartera = await api('getCartera');
   }
   pintarCartera();
@@ -952,7 +964,7 @@ async function cargarCartera() {
 
 function pintarCartera() {
   const raiz = $('#v-cartera'), c = S.cartera;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2></div></div><div class="panel"><div class="vacio"><b>Todavía no hay cartera</b>' + esc((c && c.error) || '') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Subir el Rep9</button></div></div></div>'; enlazarGeneral(raiz); return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera de clientes</h2><p class="para">Todas las líneas con su saldo, lo vencido y su próxima cuota.</p></div></div><div class="panel"><div class="vacio"><b>Todavía no hay cartera</b>' + esc((c && c.error) || '') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Cargar el Rep9</button></div></div></div>'; enlazarGeneral(raiz); return; }
   const F = {
     todos: ['Todos', () => true], atraso: ['Con atraso', l => l.saldoVencido > 0.005 || l.capVencido > 0.005],
     proxima: ['Con cuota próxima', l => !!l.proxima], datos: ['Faltan datos', l => !l.tieneCorreo || !l.tieneStp || !l.tieneTasa]
@@ -963,7 +975,7 @@ function pintarCartera() {
   const monedas = Object.keys(c.totales).sort();
   const kp = monedas.map(m => '<div class="kpi' + (m === monedas[0] ? ' dest' : '') + '"><div class="t">Cartera en ' + m + '</div><div class="v">' + dineroC(c.totales[m].saldoTotal, m) + '</div><div class="m">' + pl(c.totales[m].lineas, 'línea', 'líneas') + '</div></div>' +
     '<div class="kpi"><div class="t">Vencido en ' + m + '</div><div class="v ' + (c.totales[m].saldoVencido > 0.005 ? 'rojo' : '') + '">' + dineroC(c.totales[m].saldoVencido, m) + '</div><div class="m">' + pl(c.totales[m].conVencido, 'cliente', 'clientes') + ' con atraso</div></div>').join('');
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera</h2><p class="lead">Todas las líneas del Rep9 con corte ' + esc(cuandoTxt(c.corte.fechaHora)) + '. Toca una para ver el detalle del cliente.</p></div></div>' +
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Cartera de clientes</h2><p class="para">Todas las líneas con su saldo, lo vencido y su próxima cuota.</p><p class="lead">Todas las líneas del Rep9 con corte ' + esc(cuandoTxt(c.corte.fechaHora)) + '. Toca una para ver el detalle del cliente.</p></div></div>' +
     '<div class="kpis">' + kp + '</div>' +
     '<div class="herramientas"><div class="pildoras">' + Object.keys(F).map(k => '<button aria-pressed="' + (S.filtroCartera === k) + '" data-fc="' + k + '">' + F[k][0] + '<b>' + base.filter(F[k][1]).length + '</b></button>').join('') + '</div><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div>' +
     (lista.length ? '<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cliente</th><th class="der">Saldo total</th><th class="der">Vencido</th><th class="oculta-m">Próxima cuota</th><th></th></tr></thead><tbody>' +
@@ -1036,14 +1048,14 @@ async function abrirCliente(linea, foco) {
 /* ═══════════════════════ HISTORIAL DE ENVÍOS ═══════════════════════════════ */
 async function cargarHistorial() {
   const raiz = $('#v-historial');
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Historial de envíos</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Avisos enviados</h2><p class="para">Registro de cada correo enviado, con quién lo mandó. Aquí también se reenvía.</p></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
   S.bitacora = await api('getBitacora', { limite: 600 });
   pintarHistorial();
 }
 
 function pintarHistorial() {
   const raiz = $('#v-historial'), b = S.bitacora;
-  if (!b || !b.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Historial de envíos</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(b && b.error) + '</div></div>'; return; }
+  if (!b || !b.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Avisos enviados</h2><p class="para">Registro de cada correo enviado, con quién lo mandó. Aquí también se reenvía.</p></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(b && b.error) + '</div></div>'; return; }
   const f = S.filtroHist;
   let regs = b.registros;
   if (f.status) regs = regs.filter(r => r.status === f.status);
@@ -1051,7 +1063,7 @@ function pintarHistorial() {
   const sts = [['', 'Todos'], ['ENVIADO', 'Enviados'], ['ENVIADO_PRUEBA', 'Pruebas'], ['ERROR', 'Con error'], ['OMITIDO', 'Omitidos']];
   const tipo = { PREVENTIVO: 'Primer aviso', VISPERA: 'Segundo aviso', REENVIO: 'Reenvío', 'T-5': 'Primer aviso', 'T-1': 'Segundo aviso', 'T+0': 'Segundo aviso' };
   const chip = s => ({ ENVIADO: '<span class="chip oscuro">Enviado</span>', ENVIADO_PRUEBA: '<span class="chip suave">Prueba</span>', ERROR: '<span class="chip rojo">Error</span>', OMITIDO: '<span class="chip">Omitido</span>' })[s] || '<span class="chip">' + esc(s) + '</span>';
-  let h = '<div class="titulo-pag"><div><h2>Historial de envíos</h2><p class="lead">Cada intento queda registrado con el corte de los reportes que se usó. Se muestran los últimos ' + b.registros.length + ' movimientos.</p></div></div>' +
+  let h = '<div class="titulo-pag"><div><h2>Avisos enviados</h2><p class="para">Registro de cada correo enviado, con quién lo mandó. Aquí también se reenvía.</p><p class="lead">Cada intento queda registrado con el corte de los reportes que se usó. Se muestran los últimos ' + b.registros.length + ' movimientos.</p></div></div>' +
     '<div class="herramientas"><div class="pildoras">' + sts.map(s => '<button aria-pressed="' + (f.status === s[0]) + '" data-st="' + s[0] + '">' + s[1] + '</button>').join('') + '</div><input class="buscar" type="search" placeholder="Buscar cliente, línea o correo" value="' + esc(f.texto) + '" aria-label="Buscar"></div>';
   if (!regs.length) h += '<div class="panel"><div class="vacio"><b>Sin movimientos</b>Aquí aparecerán los envíos.</div></div>';
   let dia = '', abierto = false;
@@ -1080,7 +1092,7 @@ function pintarHistorial() {
 /* ═══════════════════════ AJUSTES DE SALDO ══════════════════════════════════ */
 async function cargarAjustes() {
   const raiz = $('#v-ajustes');
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Pagos y ajustes</h2><p class="para">Si un cliente pagó o dispuso después de bajar el Rep9, regístralo aquí y el monto del aviso se corrige.</p></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
   const res = await Promise.all([api('getAjustes'), S.cartera ? Promise.resolve(S.cartera) : api('getCartera')]);
   S.ajustes = res[0]; S.cartera = res[1];
   pintarAjustes(); contadores();
@@ -1090,7 +1102,7 @@ const TIPOS_AJUSTE = { PAGO_APLICADO: 'Pago que llegó', DISPOSICION: 'Disposici
 
 function pintarAjustes() {
   const raiz = $('#v-ajustes'), a = S.ajustes;
-  if (!a || !a.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(a && a.error) + '</div></div>'; return; }
+  if (!a || !a.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Pagos y ajustes</h2><p class="para">Si un cliente pagó o dispuso después de bajar el Rep9, regístralo aquí y el monto del aviso se corrige.</p></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(a && a.error) + '</div></div>'; return; }
   const form = can('ajustar') ? '<div class="panel"><div class="panel-cab"><div><h3>Registrar un ajuste</h3><p>Úsalo cuando un cliente pagó o pidió dinero después de que bajaste el Rep9.</p></div></div><div class="panel-cuerpo"><p class="nota" style="margin-bottom:14px">El monto del aviso cambia al instante y el ajuste deja de aplicar cuando cargues un Rep9 nuevo, porque ese ya debe traer el movimiento.' +
     (a.conAprobacion ? ' Los ajustes de ' + dineroC(a.umbral) + ' o más esperan la aprobación de otra persona.' : '') + '</p>' +
     '<div class="form-grid"><div class="campo"><label for="aj-linea">Línea de crédito</label><input id="aj-linea" inputmode="numeric" placeholder="Por ejemplo 101306" list="aj-lineas" autocomplete="off"><datalist id="aj-lineas">' + (S.cartera && S.cartera.ok ? S.cartera.lineas.map(l => '<option value="' + esc(l.linea) + '">' + esc(l.cliente) + '</option>').join('') : '') + '</datalist><small id="aj-cliente">&nbsp;</small></div>' +
@@ -1099,7 +1111,7 @@ function pintarAjustes() {
     '<div class="campo"><label for="aj-venc">Cuota afectada (opcional)</label><input id="aj-venc" type="date"><small>Si lo dejas vacío, se aplica a la primera cuota de la línea.</small></div></div>' +
     '<div class="campo" style="margin-top:14px"><label for="aj-motivo">Motivo</label><textarea id="aj-motivo" placeholder="Qué pasó y de dónde viene el dato. Por ejemplo: SPEI recibido a las 16:50, aún no aplicado."></textarea></div>' +
     '<div class="acciones"><button class="btn principal" id="aj-guardar">Registrar ajuste</button></div></div></div>' : '';
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Ajustes de saldo</h2><p class="lead">Pagos o disposiciones que llegaron después de descargar el Rep9. ' + (a.corteRep9 ? 'Hay un Rep9 vigente.' : 'Todavía no hay un Rep9 cargado.') + '</p></div></div>' + form +
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Pagos y ajustes</h2><p class="para">Si un cliente pagó o dispuso después de bajar el Rep9, regístralo aquí y el monto del aviso se corrige.</p><p class="lead">Pagos o disposiciones que llegaron después de descargar el Rep9. ' + (a.corteRep9 ? 'Hay un Rep9 vigente.' : 'Todavía no hay un Rep9 cargado.') + '</p></div></div>' + form +
     '<div class="panel"><div class="panel-cab"><div><h3>Ajustes registrados</h3><p>' + pl(a.ajustes.length, 'ajuste', 'ajustes') + '</p></div></div>' +
     (a.ajustes.length ? '<div class="tabla-wrap" style="border:0;border-radius:0"><table class="tabla"><tbody>' + a.ajustes.map(x => '<tr><td><div class="quien"><b class="num">Línea ' + esc(x.linea) + '</b><small>' + esc(x.fecha) + ', ' + esc(x.usuario.split('@')[0]) + '</small></div></td>' +
       '<td><div class="cuando"><span class="num" style="font-weight:600">' + dinero(x.monto) + '</span><small>' + esc(TIPOS_AJUSTE[x.tipo] || x.tipo) + '</small></div></td>' +
@@ -1132,7 +1144,7 @@ function pintarAjustes() {
 /* ═══════════════════════ DATOS DE CLIENTES ═════════════════════════════════ */
 async function cargarDatos() {
   const raiz = $('#v-datos');
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="cargando"><span class="giro"></span>Revisando la cartera…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos faltantes</h2><p class="para">Clientes a los que les falta correo, cuenta STP o tasa para poder avisarles bien.</p></div></div><div class="cargando"><span class="giro"></span>Revisando la cartera…</div>';
   S.datos = await api('getCatalogos');
   pintarDatos(); contadores();
 }
@@ -1148,12 +1160,12 @@ const LISTAS_DATOS = [
 
 function pintarDatos() {
   const raiz = $('#v-datos'), c = S.datos;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos faltantes</h2><p class="para">Clientes a los que les falta correo, cuenta STP o tasa para poder avisarles bien.</p></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
   const a = c.auditoria;
-  if (!a.cartera) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2></div></div><div class="panel"><div class="vacio"><b>Primero sube un Rep9</b>La revisión compara los catálogos contra la cartera del Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Ir a subir el reporte</button></div></div></div>'; enlazarGeneral(raiz); return; }
+  if (!a.cartera) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos faltantes</h2><p class="para">Clientes a los que les falta correo, cuenta STP o tasa para poder avisarles bien.</p></div></div><div class="panel"><div class="vacio"><b>Primero sube un Rep9</b>La revisión compara los catálogos contra la cartera del Rep9.<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Cargar los reportes</button></div></div></div>'; enlazarGeneral(raiz); return; }
   const actual = LISTAS_DATOS.find(l => l[0] === S.listaDatos) || LISTAS_DATOS[0];
   const lista = a[actual[0]] || [];
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos de clientes</h2><p class="lead">Lo que le falta a la cartera para que sus avisos y sus moratorios salgan completos.</p></div></div>' +
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Datos faltantes</h2><p class="para">Clientes a los que les falta correo, cuenta STP o tasa para poder avisarles bien.</p><p class="lead">Lo que le falta a la cartera para que sus avisos y sus moratorios salgan completos.</p></div></div>' +
     '<div class="pildoras" style="margin-bottom:12px">' + LISTAS_DATOS.map(l => '<button aria-pressed="' + (S.listaDatos === l[0]) + '" data-cl="' + l[0] + '">' + l[1] + '<b>' + (a[l[0]] || []).length + '</b></button>').join('') + '</div>' +
     '<p class="grupo-nota" style="padding-left:0">' + esc(actual[2]) + '</p>' +
     (lista.length ? '<div class="tabla-wrap"><table class="tabla"><tbody>' + lista.slice(0, 150).map(x => '<tr><td><div class="quien"><b title="' + esc(x.cliente || '') + '">' + esc(x.cliente || ('Línea ' + x.linea)) + '</b><small>Línea ' + esc(x.linea) + (x.correo ? ', ' + esc(x.correo) : '') + '</small></div></td><td><div class="cuando">' + (x.saldo ? 'Saldo ' + dinero(x.saldo, x.moneda) : '') + '</div></td><td class="der">' + (can('catalogo') ? '<button class="btn chico principal" data-ficha="' + esc(x.linea) + '">Completar</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' + (lista.length > 150 ? '<p class="nota" style="margin-top:8px">Se muestran las primeras 150.</p>' : '')
@@ -1199,7 +1211,7 @@ const CONFIG_GRUPOS = [
 
 async function cargarConfig() {
   const raiz = $('#v-config');
-  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
+  raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2><p class="para">Cada cuántos días se descarga, a quién se copia, Chat, modo prueba y días inhábiles.</p></div></div><div class="cargando"><span class="giro"></span>Cargando…</div>';
   S.config = await api('getConfigUI');
   pintarConfig();
 }
@@ -1213,11 +1225,11 @@ function controlParam(clave, valor, tipo, dis) {
 
 function pintarConfig() {
   const raiz = $('#v-config'), c = S.config;
-  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
+  if (!c || !c.ok) { raiz.innerHTML = '<div class="titulo-pag"><div><h2>Configuración</h2><p class="para">Cada cuántos días se descarga, a quién se copia, Chat, modo prueba y días inhábiles.</p></div></div><div class="panel"><div class="vacio"><b>No se pudo leer</b>' + esc(c && c.error) + '</div></div>'; return; }
   const admin = c.puedeConfig, val = {}; c.params.forEach(p => val[p.clave] = p.valor);
   const usadas = new Set();
   const panel = (t, n, cuerpo) => '<div class="panel"><div class="panel-cab"><div><h3>' + t + '</h3>' + (n ? '<p>' + n + '</p>' : '') + '</div></div><div class="panel-cuerpo">' + cuerpo + '</div></div>';
-  let h = '<div class="titulo-pag"><div><h2>Configuración</h2><p class="lead">' + (admin ? 'Los cambios se guardan al salir de cada campo y quedan registrados.' : 'Solo un administrador puede cambiar estos valores.') + '</p></div></div>';
+  let h = '<div class="titulo-pag"><div><h2>Configuración</h2><p class="para">Cada cuántos días se descarga, a quién se copia, Chat, modo prueba y días inhábiles.</p><p class="lead">' + (admin ? 'Los cambios se guardan al salir de cada campo y quedan registrados.' : 'Solo un administrador puede cambiar estos valores.') + '</p></div></div>';
   CONFIG_GRUPOS.forEach(gr => {
     let cu = '';
     if (gr.chat) {
