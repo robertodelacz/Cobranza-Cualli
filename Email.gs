@@ -3,7 +3,7 @@
  *  COBRANZA PREVENTIVA v2 — Email.gs
  *  Plantillas del aviso de pago. Dos variantes de contenido:
  *    A  cuenta al corriente: monto de la cuota.
- *    B  con saldo vencido: se desglosa lo vencido y los moratorios.
+ *    B  con saldo vencido: el mismo importe único, con una nota breve.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -41,21 +41,6 @@ function construirCorreo_(item, opts) {
   };
 }
 
-function filasDesglose_(item, moneda) {
-  const d = item.desglose, f = (n) => formatearMoney_(n, moneda);
-  const filas = [];
-  if (d.capital) filas.push(['Capital', f(d.capital)]);
-  if (d.intereses) filas.push(['Intereses', f(d.intereses)]);
-  if (d.otros) filas.push(['Otros cargos', f(d.otros)]);
-  if (d.iva) filas.push(['IVA', f(d.iva)]);
-  if (d.capVencido) filas.push(['Capital vencido', f(d.capVencido)]);
-  if (d.intVencidos) filas.push(['Intereses vencidos (con IVA)', f(d.intVencidos)]);
-  const mor = round2_(d.moratoriosAcum + d.moratoriosProy);
-  if (mor) filas.push(['Intereses moratorios (con IVA)', f(mor)]);
-  if (d.ajustes) filas.push([d.ajustes < 0 ? 'Pagos o abonos aplicados' : 'Otros movimientos', f(d.ajustes)]);
-  return filas;
-}
-
 // ─── HTML ──────────────────────────────────────────────────────────────────
 
 function construirHTML_(item, fechaLarga, moneda, esVispera, montoAnterior) {
@@ -75,13 +60,6 @@ function construirHTML_(item, fechaLarga, moneda, esVispera, montoAnterior) {
     : '';
   const notaActualizado = montoAnterior !== null
     ? '<p style="font-family: Arial, sans-serif; margin:0 0 14px 0; font-size:13px; color:' + COLOR.GRAY_INST + '; line-height:1.55; text-align: justify;">El importe se actualizó respecto del aviso anterior (' + escaparHtml_(formatearMoney_(montoAnterior, moneda)) + ') por movimientos aplicados en su cuenta.</p>'
-    : '';
-
-  const desglose = filasDesglose_(item, moneda).map(function (f) {
-    return '<tr><td style="padding:5px 0; color:' + COLOR.GRAY_500 + ';">' + escaparHtml_(f[0]) + '</td><td align="right" style="padding:5px 0; color:' + COLOR.GRAY_DARK + ';">' + escaparHtml_(f[1]) + '</td></tr>';
-  }).join('');
-  const bloqueDesglose = desglose
-    ? '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:14px; border-top:1px solid ' + COLOR.GRAY_200 + '; font-family: Arial, sans-serif; font-size:13px;">' + desglose + '</table>'
     : '';
 
   return '<!DOCTYPE html>\n<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Aviso de pago</title></head>\n' +
@@ -106,7 +84,6 @@ notaVencido + notaActualizado +
 '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:' + COLOR.GRAY_100 + '; border:1px solid ' + COLOR.GRAY_200 + '; border-radius:8px;"><tr><td style="padding:22px 24px;">\n' +
 '<div align="center" style="font-family: Arial, sans-serif; font-size:14px; color:' + COLOR.GRAY_500 + '; letter-spacing:0.04em; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">Cantidad a pagar</div>\n' +
 '<div align="center" style="font-family: Arial, sans-serif; font-size:26px; color:' + COLOR.GRAY_INST + '; font-weight:bold; line-height:1.2;">' + escaparHtml_(totalFmt) + ' <span style="font-size:14px; color:' + COLOR.GRAY_500 + '; font-weight:normal;">' + escaparHtml_(moneda) + '</span></div>\n' +
-bloqueDesglose +
 '</td></tr></table></td></tr>\n' +
 // Cuenta
 '<tr><td style="padding:0 36px 6px 36px;">\n' +
@@ -145,7 +122,6 @@ function construirTextoPlano_(item, fechaLarga, moneda, esVispera, montoAnterior
   if (item.plantilla === 'B') lineas.push('Su línea presenta saldos vencidos; el importe incluye lo vencido y los intereses moratorios calculados a la fecha de pago.', '');
   if (montoAnterior !== null) lineas.push('El importe se actualizó respecto del aviso anterior (' + formatearMoney_(montoAnterior, moneda) + ') por movimientos aplicados en su cuenta.', '');
   lineas.push('Cantidad a pagar: ' + formatearMoney_(item.total, moneda) + ' ' + moneda);
-  filasDesglose_(item, moneda).forEach(f => lineas.push('  ' + f[0] + ': ' + f[1]));
   lineas.push('', 'Cuenta de depósito:', '  Banco: ' + BANCO_FIJO, '  Beneficiario: ' + BENEFICIARIO_FIJO, '  CLABE: ' + (item.cuentaSTP || '—'), '',
     'Es importante realizar su pago en tiempo y forma para evitar la generación de intereses moratorios y/o comisiones. La hora límite de recepción de pagos a fin de mes es las 5:00 pm; los depósitos posteriores se aplican con fecha del día hábil siguiente.', '',
     'Agradecemos su confirmación de depósito por este medio. Cualquier duda o aclaración estamos a sus órdenes.', '',
