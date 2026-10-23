@@ -42,3 +42,29 @@ t('si el archivo trae cuotas de varios días, se conserva solo lo que queda fuer
   assert.deepStrictEqual(cache().map(x => x[1]), ['2001', '2002', '2004', '2003']);
 });
 console.log('\n' + ok + ' pruebas OK');
+
+// ── Validación al subir: la cobertura se juzga con lo ya cargado + el archivo ──
+{
+  const m2 = build({ hoy: '2026-10-23' });
+  const cache2 = rows => m2.run('guardarCache_("rep1", ' + JSON.stringify([H].concat(rows)) + ', {})');
+  const validar = rows => m2.plain(m2.run('validarReporte("rep1", ' + JSON.stringify([H].concat(rows)) + ', {})'));
+  const v0 = m2.plain(m2.run('estadoTanda_()')).ventana;
+  const dia = (k, n) => m2.run('addDays_("' + k + '", ' + n + ')');
+  t('al subir un archivo que ya trae todo el rango recomendado: sin advertencias de cobertura', () => {
+    const r = validar([fila(v0.nominalDesde, '3001'), fila(v0.nominalHasta, '3002')]);
+    assert.ok(r.ok); assert.ok(!r.avisos.some(a => a.nivel === 'warn'), JSON.stringify(r.avisos));
+  });
+  t('archivo que empieza tarde, pero lo ya cargado cubre el inicio: sin advertencia y avisa que se conserva', () => {
+    cache2([fila(v0.nominalDesde, '3001'), fila(v0.nominalDesde, '3002')]);
+    const r = validar([fila(v0.nominalHasta, '3003')]);
+    assert.ok(!r.avisos.some(a => a.nivel === 'warn'), JSON.stringify(r.avisos));
+    assert.ok(r.avisos.some(a => a.nivel === 'info' && /se conservan/.test(a.texto)), JSON.stringify(r.avisos));
+  });
+  t('archivo que empieza tarde y no hay nada cargado que lo cubra: advierte', () => {
+    const m3 = build({ hoy: '2026-10-23' });
+    const v = m3.plain(m3.run('estadoTanda_()')).ventana;
+    const r = m3.plain(m3.run('validarReporte("rep1", ' + JSON.stringify([H].concat([fila(v.nominalHasta, '3004')])) + ', {})'));
+    assert.ok(r.avisos.some(a => a.nivel === 'warn' && /empieza el/.test(a.texto)), JSON.stringify(r.avisos));
+  });
+}
+console.log('\n(con validación) ' + ok + ' pruebas OK');

@@ -101,9 +101,15 @@ function validarReporte(tipo, rows, meta) {
       const min = validas.length ? validas.reduce((a, b) => a < b ? a : b) : null;
       const max = validas.length ? validas.reduce((a, b) => a > b ? a : b) : null;
       const avisos = [];
+      // Lo que ya está cargado y este archivo no cubre se conserva: la cobertura se juzga con ambos.
+      const sh1c = spreadsheet_().getSheetByName(SHEETS.CACHE_REP1);
+      const previas = (sh1c && min && max) ? cuotasPendientesAnteriores_(sh1c, REP1_HEADERS.length, min, max) : [];
+      const kPrev = previas.map(r => fechaKeyDeHoja_(r[REP1.FECHA_VENC])).filter(Boolean).sort();
+      const cobMin = kPrev.length && kPrev[0] < min ? kPrev[0] : min, cobMax = kPrev.length && kPrev[kPrev.length - 1] > max ? kPrev[kPrev.length - 1] : max;
+      if (previas.length) avisos.push({ nivel: 'info', texto: 'Ya hay ' + previas.length + ' cuota(s) cargadas que vencen del ' + fechaDMA_(kPrev[0]) + ' al ' + fechaDMA_(kPrev[kPrev.length - 1]) + '; se conservan junto con las de este archivo.' });
       if (validas.length < keys.length) avisos.push({ nivel: 'warn', texto: (keys.length - validas.length) + ' fila(s) con fecha de vencimiento ilegible; se ignorarán.' });
-      if (max && max < addDays_(v.nominalHasta, -2)) avisos.push({ nivel: 'warn', texto: 'El archivo llega hasta el ' + fechaDMA_(max) + ' y el Rep1 de hoy necesita hasta el ' + fechaDMA_(v.nominalHasta) + '. Confirma que el filtro del reporte fue el recomendado.' });
-      if (min && min > addDays_(v.nominalDesde, 2)) avisos.push({ nivel: 'warn', texto: 'El archivo empieza el ' + fechaDMA_(min) + ' y el Rep1 de hoy necesita desde el ' + fechaDMA_(v.nominalDesde) + '.' });
+      if (cobMax && cobMax < addDays_(v.nominalHasta, -2)) avisos.push({ nivel: 'warn', texto: 'Lo cargado llega hasta el ' + fechaDMA_(cobMax) + ' y el Rep1 de hoy necesita hasta el ' + fechaDMA_(v.nominalHasta) + '. Confirma que el filtro del reporte fue el recomendado.' });
+      if (cobMin && cobMin > addDays_(v.nominalDesde, 2)) avisos.push({ nivel: 'warn', texto: 'Lo cargado empieza el ' + fechaDMA_(cobMin) + ' y el Rep1 de hoy necesita desde el ' + fechaDMA_(v.nominalDesde) + '.' });
       const fuera = validas.filter(k => k < v.nominalDesde || k > v.nominalHasta).length;
       if (fuera) avisos.push({ nivel: 'info', texto: fuera + ' cuota(s) quedan fuera del rango recomendado (' + fechaDMA_(v.nominalDesde) + ' a ' + fechaDMA_(v.nominalHasta) + ').' });
       const hoyOAntes = validas.filter(k => siguienteHabil_(k) <= hoy).length;

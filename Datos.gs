@@ -183,7 +183,7 @@ function guardarCache_(tipo, rows, meta) {
 
   const usuario = usuarioActual_().email;
   const ahora = ahoraMX_();
-  const corteId = (esRep1 ? 'R1-' : 'R9-') + ahora.replace(/[-: ]/g, '').slice(0, 14) + '-' + Math.floor(Math.random() * 1296).toString(36).padStart(2, '0');
+  const corteId = (esRep1 ? 'R1-' : 'R9-') + ahora.replace(/[-: ]/g, '').slice(0, 14) + '-' + Math.floor(Math.random() * 1679616).toString(36).padStart(4, '0');
 
   const dataRows = rows.slice(1).filter(r => r.some(c => c !== null && c !== undefined && c !== ''));
   if (!dataRows.length) return { ok: false, error: tipo.toUpperCase() + ': no hay filas con datos.' };

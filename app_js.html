@@ -75,7 +75,7 @@ function toast(msg, tipo) {
   el.className = 'toast' + (tipo === 'error' ? ' error' : '');
   el.textContent = msg;
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), tipo === 'error' ? 7000 : 3800);
+  setTimeout(() => el.remove(), tipo === 'error' || msg.length > 90 ? 8000 : 3800);
 }
 function copiar(texto) {
   const ok = () => toast('Copiado: ' + texto);
@@ -331,8 +331,10 @@ function enlazarGeneral(raiz) {
 function zonaHTML(tp, chica) {
   const R = REP[tp];
   return '<div class="zona ' + (chica ? 'chica' : '') + '" data-zona="' + tp + '" tabindex="0" role="button" aria-label="Elegir archivo del ' + R.n + '">' + ico('subir') +
-    (chica ? '<strong>Reemplazar con un archivo nuevo</strong><span>arrastra o haz clic</span>' : '<strong>Arrastra el ' + R.n + ' aquí</strong><span>o haz clic para elegir el archivo de Excel (.xlsx)</span>') +
-    '</div><input type="file" accept=".xlsx,.xls" hidden data-archivo="' + tp + '">';
+    (chica ? (tp === 'rep1' ? '<strong>Cargar más vencimientos</strong><span>arrastra el Rep1 o haz clic</span>' : '<strong>Cargar un Rep9 más reciente</strong><span>arrastra el Rep9 o haz clic</span>')
+      : '<strong>Arrastra el ' + R.n + ' aquí</strong><span>o haz clic para elegir el archivo de Excel (.xlsx)</span>') +
+    '</div><input type="file" accept=".xlsx,.xls" hidden data-archivo="' + tp + '">' +
+    (chica ? '<p class="zona-nota">' + (tp === 'rep1' ? 'Lo que ya está cargado se conserva. Las fechas que traiga el archivo nuevo se actualizan.' : 'Sustituye al Rep9 anterior, así que debe traer toda la cartera.') + '</p>' : '');
 }
 function filtroAyudaHTML(tp) {
   const v = S.estado.tanda.ventana;
