@@ -549,6 +549,41 @@ function codigos(i) { return i.bloqueos.concat(i.alertas.filter(a => a.nivel ===
 function coincide(i) { const q = S.busqueda.trim().toLowerCase(); return !q || (i.linea + ' ' + i.cliente).toLowerCase().indexOf(q) >= 0; }
 function quienHTML(i) { return '<div class="quien"><b title="' + esc(i.cliente) + '">' + esc(i.cliente) + '</b><small>Línea ' + esc(i.linea) + '</small></div>'; }
 function pagaHTML(i) { return '<div class="cuando">Paga ' + dCorta(i.fechaPago) + (i.fechaPago !== i.fechaNominal ? '<small>vence ' + dCorta(i.fechaNominal) + ', día inhábil</small>' : '') + '</div>'; }
+/* Cuándo sale cada aviso (primer aviso y segundo aviso) */
+function avisoPlano(a) {
+  if (!a) return 'no salió';
+  return ({ ENVIADO: 'enviado ' + (a.fecha ? dCorta(a.fecha) : ''), HOY: 'hoy', ATRASADO: 'hoy', PROGRAMADO: dCorta(a.fecha), OMITIDO: 'no sale' })[a.estado] || '';
+}
+function avisoCelda(a, activo) {
+  if (!a) return '<div class="cal"><b class="cal-no">No salió</b></div>';
+  let h;
+  if (a.estado === 'ENVIADO') h = '<b class="cal-ok">Enviado</b><small>' + dCorta(a.fecha) + '</small>';
+  else if (a.estado === 'HOY') h = '<b class="cal-hoy">Hoy</b>';
+  else if (a.estado === 'ATRASADO') h = '<b class="cal-hoy">Hoy</b><small>su día era el ' + dCorta(a.previsto) + '</small>';
+  else if (a.estado === 'OMITIDO') h = '<b class="cal-no">No sale</b><small>queda muy cerca del primero</small>';
+  else h = '<b>' + dCorta(a.fecha) + '</b>';
+  if (a.cubierto === false) h += '<small class="cal-ojo">Antes, cargar reportes nuevos</small>';
+  return '<div class="cal' + (activo ? ' toca' : '') + '">' + h + '</div>';
+}
+function calLinea(i) {
+  const c = i.calendario || {};
+  return '<small class="cal-linea">Primer aviso: ' + esc(avisoPlano(c.a1)) + ' · Segundo aviso: ' + esc(avisoPlano(c.a2)) + '</small>';
+}
+function calPanelHTML(i) {
+  const c = i.calendario || {}, dias = S.cola.dias || { a1: 5, a2: 1, separacion: 2 };
+  const txt = a => {
+    if (!a) return '<b>No salió</b>';
+    if (a.estado === 'ENVIADO') return '<b>Enviado el ' + dLarga(a.fecha) + '</b>';
+    if (a.estado === 'HOY') return '<b>Sale hoy</b>';
+    if (a.estado === 'ATRASADO') return '<b>Sale hoy</b><span>Su día era el ' + dLarga(a.previsto) + '; sale en el primer envío posible.</span>';
+    if (a.estado === 'OMITIDO') return '<b>No sale</b><span>Quedaría a menos de ' + pl(dias.separacion, 'día hábil', 'días hábiles') + ' del primer aviso.</span>';
+    return '<b>Sale el ' + dLarga(a.fecha) + '</b>';
+  };
+  const fila = (nombre, a) => '<div class="cal-fila"><span class="cal-nom">' + nombre + '</span><div class="cal-det">' + txt(a) +
+    (a && a.cubierto === false ? '<span class="cal-aviso">Esa fecha queda después de la vigencia de los reportes' + (S.cola.vigenciaHasta ? ' (' + dLarga(S.cola.vigenciaHasta) + ')' : '') + ': antes hay que cargar reportes nuevos.</span>' : '') + '</div></div>';
+  return fila('Primer aviso', c.a1) + fila('Segundo aviso', c.a2) +
+    '<p class="cal-nota">El primer aviso sale ' + pl(dias.a1, 'día hábil', 'días hábiles') + ' antes del pago y el segundo ' + pl(dias.a2, 'día hábil', 'días hábiles') + ' antes.</p>';
+}
 function chipAviso(i) { return i.accion === 'PREVENTIVO' ? '<span class="chip suave">Primer aviso</span>' : i.accion === 'VISPERA' ? '<span class="chip amarillo">Segundo aviso</span>' : ''; }
 function grupoCab(icono, titulo, cuantos, extra) { return '<div class="grupo-cab">' + ico(icono) + '<h3>' + titulo + '</h3><span class="cuantos">' + cuantos + '</span><span class="espacio"></span>' + (extra || '') + '</div>'; }
 function vacioSinReportes(msg) { return '<div class="titulo-pag"><div><h2>Enviar avisos</h2><p class="para">Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía.</p></div></div><div class="panel"><div class="vacio"><b>Todavía no hay avisos</b>' + esc(msg || 'Sube el Rep1 y el Rep9 para que la plataforma calcule los avisos de hoy.') + '<div style="margin-top:16px"><button class="btn principal" data-ir="reportes">Cargar los reportes</button></div></div></div>'; }
@@ -568,21 +603,21 @@ function pintarAvisos() {
   const selec = g.listos.filter(i => !S.excl.has(i.key));
   const puedeEnviar = can('enviar');
 
-  let h = '<div class="titulo-pag"><div><h2>Enviar avisos</h2><p class="para">Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía.</p><p class="lead">Calculados con el Rep1 de ' + esc(cuandoTxt(c.frescura.rep1.corte.fechaHora)) + ' y el Rep9 de ' + esc(cuandoTxt(c.frescura.rep9.corte.fechaHora)) + '. Toca una fila para ver cómo se construyó su monto.</p></div>' +
+  let h = '<div class="titulo-pag"><div><h2>Enviar avisos</h2><p class="para">Los correos de cobro que salen hoy: revisa, quita los que no quieras y envía.</p><p class="lead">Calculados con el Rep1 de ' + esc(cuandoTxt(c.frescura.rep1.corte.fechaHora)) + ' y el Rep9 de ' + esc(cuandoTxt(c.frescura.rep9.corte.fechaHora)) + '. Toca una fila para ver cómo se construyó su monto.' + (c.vigenciaHasta && c.vigenciaHasta >= c.hoy ? ' Estos reportes sirven para enviar hasta el ' + esc(dLarga(c.vigenciaHasta)) + '.' : '') + '</p></div>' +
     '<div class="acciones-pag"><input class="buscar" type="search" placeholder="Buscar cliente o línea" value="' + esc(S.busqueda) + '" aria-label="Buscar"></div></div>';
   if (caducos) h += '<div class="banner" style="margin-bottom:6px">' + ico('warn') + '<span>Los reportes ya no están al día, por eso no se puede enviar nada.</span><button class="btn chico" data-ir="reportes">Cargar reportes</button></div>';
 
   h += '<div class="grupo" style="margin-top:6px">' + grupoCab('listo', 'Listos para enviar', g.listos.length ? pl(g.listos.length, 'aviso', 'avisos') + ', ' + montosTxt(g.listos) : '0 avisos',
     g.listos.length && puedeEnviar ? '<button class="btn texto chico" data-todos="' + (selec.length === g.listos.length ? 'no' : 'si') + '">' + (selec.length === g.listos.length ? 'Quitar todos' : 'Seleccionar todos') + '</button>' : '');
   if (listos.length) {
-    h += '<p class="grupo-nota">Ya están marcados. Quita la marca de los que no quieras enviar ahora y usa el botón de abajo.</p><div class="tabla-wrap"><table class="tabla"><thead><tr><th class="col-tilde"></th><th>Cliente</th><th>Paga</th><th class="oculta-m">Aviso</th><th class="der">Total</th><th></th></tr></thead><tbody>' + listos.map(i =>
-      '<tr class="clic" data-key="' + esc(i.key) + '"><td class="col-tilde"><input type="checkbox" class="tilde" data-sel ' + (S.excl.has(i.key) ? '' : 'checked') + (puedeEnviar ? '' : ' disabled') + ' aria-label="Incluir ' + esc(i.cliente) + ' en el envío"></td><td>' + quienHTML(i) + '</td><td>' + pagaHTML(i) + '</td><td class="oculta-m">' + chipAviso(i) + '</td><td class="der monto num">' + dinero(i.total, i.moneda) + '</td><td class="der">' + '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>' + '</td></tr>').join('') + '</tbody></table></div>';
+    h += '<p class="grupo-nota">Ya están marcados. Quita la marca de los que no quieras enviar ahora y usa el botón de abajo.</p><div class="tabla-wrap"><table class="tabla"><thead><tr><th class="col-tilde"></th><th>Cliente</th><th>Paga</th><th class="oculta-m">Primer aviso</th><th class="oculta-m">Segundo aviso</th><th class="der">Total</th><th></th></tr></thead><tbody>' + listos.map(i =>
+      '<tr class="clic" data-key="' + esc(i.key) + '"><td class="col-tilde"><input type="checkbox" class="tilde" data-sel ' + (S.excl.has(i.key) ? '' : 'checked') + (puedeEnviar ? '' : ' disabled') + ' aria-label="Incluir ' + esc(i.cliente) + ' en el envío"></td><td>' + quienHTML(i) + '</td><td>' + pagaHTML(i) + '</td><td class="oculta-m">' + avisoCelda((i.calendario || {}).a1, i.accion === 'PREVENTIVO') + '</td><td class="oculta-m">' + avisoCelda((i.calendario || {}).a2, i.accion === 'VISPERA') + '</td><td class="der monto num">' + dinero(i.total, i.moneda) + '</td><td class="der">' + '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>' + '</td></tr>').join('') + '</tbody></table></div>';
   } else h += '<div class="panel"><div class="vacio">' + (g.listos.length ? '<b>Sin resultados</b>Prueba con otro nombre o número de línea.' : '<b>No hay avisos listos por ahora</b>' + (g.revisar.length + g.bloqueadas.length ? 'Revisa los que necesitan atención.' : 'Cuando haya cuotas por avisar aparecerán aquí.')) + '</div></div>';
   h += '</div>';
 
   if (revisar.length) {
     h += '<div class="grupo">' + grupoCab('warn', 'Revisa antes de enviar', pl(revisar.length, 'aviso', 'avisos')) + '<p class="grupo-nota">Se pueden enviar, pero tienen una observación. Completa el dato o envíalos tal como están.</p><div class="tabla-wrap"><table class="tabla"><tbody>' +
-      revisar.map(i => '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + ', ' + dinero(i.total, i.moneda) + '.</b> ' + motivos(i).map(esc).join(' ') + '</td><td><div class="celda-acc">' +
+      revisar.map(i => '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + ', ' + dinero(i.total, i.moneda) + '.</b> ' + motivos(i).map(esc).join(' ') + calLinea(i) + '</td><td><div class="celda-acc">' +
         (codigos(i).some(k => k === 'SIN_TASA' || k === 'TASA_DUPLICADA' || k === 'CONTACTO_DUPLICADO') && can('catalogo') ? '<button class="btn chico" data-datos="' + esc(i.linea) + '">Completar datos</button>' : '') +
         '<button class="btn chico" data-ver="' + esc(i.key) + '">Ver cálculo</button>' + (puedeEnviar ? '<button class="btn chico principal" data-asi="' + esc(i.key) + '">Enviar así</button>' : '') + '</div></td></tr>').join('') + '</tbody></table></div></div>';
   }
@@ -593,17 +628,17 @@ function pintarAvisos() {
         const boton = k.some(x => x === 'SIN_CORREO' || x === 'SIN_STP') ? '<button class="btn chico principal" data-datos="' + esc(i.linea) + '">Completar datos</button>'
           : k.some(x => x === 'REP1_VENCIDO' || x === 'REP9_VENCIDO') ? '<button class="btn chico principal" data-ir="reportes">Cargar reportes</button>'
           : k.indexOf('AJUSTE_PENDIENTE') >= 0 ? '<button class="btn chico principal" data-ir="ajustes">Ver ajustes</button>' : '<button class="btn chico" data-ficha="' + esc(i.linea) + '">Ver cliente</button>';
-        return '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + '.</b> ' + motivos(i).map(esc).join(' ') + '</td><td><div class="celda-acc">' + boton + '</div></td></tr>';
+        return '<tr><td>' + quienHTML(i) + '</td><td class="motivo"><b>Paga ' + dCorta(i.fechaPago) + '.</b> ' + motivos(i).map(esc).join(' ') + calLinea(i) + '</td><td><div class="celda-acc">' + boton + '</div></td></tr>';
       }).join('') + '</tbody></table></div></div>';
   }
   const filaSimple = (i, col2) => '<tr class="clic" data-key="' + esc(i.key) + '"><td>' + quienHTML(i) + '</td><td><div class="cuando">' + col2 + '</div></td><td class="der monto num">' + dinero(i.total, i.moneda) + '</td><td class="der">' + '<svg width="18" height="18" aria-hidden="true" style="color:var(--g400)"><use href="#g-der"/></svg>' + '</td></tr>';
   if (luego.length) {
     h += '<details class="plegable"><summary>' + ico('reloj') + '<h3>Más adelante</h3><span class="cuantos">' + pl(luego.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="tabla-wrap"><table class="tabla"><tbody>' +
-      luego.map(i => filaSimple(i, (i.estado === 'ESPERA_VISPERA' ? 'Segundo aviso el ' : 'Primer aviso el ') + dCorta(i.programadaPara) + '<small>Paga ' + dCorta(i.fechaPago) + '</small>')).join('') + '</tbody></table></div></details>';
+      luego.map(i => { const k = i.calendario || {}; return filaSimple(i, 'Primer aviso: ' + esc(avisoPlano(k.a1)) + '<small>Segundo aviso: ' + esc(avisoPlano(k.a2)) + ' · Paga ' + dCorta(i.fechaPago) + '</small>'); }).join('') + '</tbody></table></div></details>';
   }
   if (atend.length) {
     h += '<details class="plegable"><summary>' + ico('ok') + '<h3>Ya atendidos</h3><span class="cuantos">' + pl(atend.length, 'aviso', 'avisos') + '</span><span class="mas">Ver ' + ico('abajo') + '</span></summary><div class="tabla-wrap"><table class="tabla"><tbody>' +
-      atend.map(i => filaSimple(i, ({ COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' })[i.estado] + '<small>Pago ' + dCorta(i.fechaPago) + (i.nota ? ', ' + esc(i.nota) : '') + '</small>')).join('') + '</tbody></table></div></details>';
+      atend.map(i => { const k = i.calendario || {}; return filaSimple(i, ({ COMPLETA: 'Avisos enviados', VENCE_HOY: 'Vence hoy', VENCIDA: 'Ya venció' })[i.estado] + '<small>Pago ' + dCorta(i.fechaPago) + ' · Primer aviso: ' + esc(avisoPlano(k.a1)) + ' · Segundo aviso: ' + esc(avisoPlano(k.a2)) + (i.nota ? ' · ' + esc(i.nota) : '') + '</small>'); }).join('') + '</tbody></table></div></details>';
   }
   if (selec.length && puedeEnviar) {
     h += '<div class="barra-envio"><div class="resumen-envio">' + pl(selec.length, 'aviso seleccionado', 'avisos seleccionados') + '<small>' + esc(montosTxt(selec)) + '</small></div>' +
@@ -694,6 +729,7 @@ async function abrirCuota(key) {
     .concat(hist.map(x => ico('info') + '<span>' + esc(x) + '</span>'));
   cuerpo.innerHTML =
     '<div class="bloque"><div class="grande-num num">' + dinero(i.total, i.moneda) + '<small>' + i.moneda + '</small></div><p style="margin-top:8px">Paga el <b>' + dLarga(i.fechaPago) + '</b>.</p><p style="margin-top:8px">' + chipAviso(i) + ' <span style="color:var(--g600);font-size:14px">' + esc(estadoTxt) + '</span></p></div>' +
+    '<div class="bloque"><h3>Cuándo salen los avisos</h3>' + calPanelHTML(i) + '</div>' +
     (avs.length ? '<div class="bloque"><h3>Qué hay que saber</h3><ul class="avisos-lista">' + avs.map(x => '<li>' + x + '</li>').join('') + '</ul></div>' : '') +
     '<div class="bloque"><h3>Cómo se construyó este monto</h3>' + cintaHTML(i) + '</div>' +
     '<div class="bloque"><h3>Correo</h3><div id="ap-correo"><button class="btn" data-ver-correo>' + icoI('ojo') + 'Ver el correo tal como llegará</button></div></div>';

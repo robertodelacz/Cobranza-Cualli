@@ -32,6 +32,41 @@ function calcularFrescura_(c1, c9, hoy, L) {
   };
 }
 
+/**
+ * Cuándo sale cada aviso de una cuota (para mostrarlo en Avisos).
+ *   estado: ENVIADO (ya salió; fecha real), HOY, PROGRAMADO (fecha futura),
+ *           ATRASADO (su día ya pasó y saldrá en el primer envío posible) u
+ *           OMITIDO (el aviso 2 no sale por quedar muy cerca del aviso 1).
+ *   cubierto: la fecha cae dentro de la vigencia de los reportes cargados; si es
+ *           false, antes de esa fecha hay que cargar reportes nuevos.
+ */
+function calendarioAvisos_(pago, dh, reg, dias, hoy, vigenciaHasta) {
+  const hoyH = esHabil_(hoy) ? hoy : siguienteHabil_(hoy);
+  const cubre = f => !vigenciaHasta || f <= vigenciaHasta;
+  let a1 = null, a2 = null;
+  if (reg.previo) a1 = { fecha: reg.previo.fechaKey, estado: 'ENVIADO', cubierto: true };
+  else if (dh > 0) {
+    const plan = restarHabiles_(pago, dias.a1), tarde = plan < hoyH;
+    const f = tarde ? hoyH : plan;
+    a1 = { fecha: f, estado: tarde ? 'ATRASADO' : (f === hoyH ? 'HOY' : 'PROGRAMADO'), previsto: plan, cubierto: cubre(f) };
+  }
+  if (reg.vispera) a2 = { fecha: reg.vispera.fechaKey, estado: 'ENVIADO', cubierto: true };
+  else if (dh > 0) {
+    const plan = restarHabiles_(pago, dias.a2), f = plan < hoyH ? hoyH : plan;
+    if (a1 && habilesEntre_(a1.fecha, f) < dias.separacion) a2 = { fecha: f, estado: 'OMITIDO', cubierto: true };
+    else a2 = { fecha: f, estado: f === hoyH ? 'HOY' : 'PROGRAMADO', cubierto: cubre(f) };
+  }
+  return { a1: a1, a2: a2 };
+}
+
+/** Último día hábil en que los reportes cargados todavía permiten enviar. */
+function vigenciaReportes_(frescura) {
+  const f = x => (x.corte && x.corte.fechaKey) ? sumarHabiles_(x.corte.fechaKey, x.max) : null;
+  const v1 = f(frescura.rep1), v9 = f(frescura.rep9);
+  if (!v1 || !v9) return v1 || v9 || null;
+  return v1 < v9 ? v1 : v9;
+}
+
 function calcularCola_() {
   const hoy = hoyKey_();
   const ss = spreadsheet_();
@@ -46,6 +81,7 @@ function calcularCola_() {
   const c1 = leerCorteMeta_(sh1), c9 = leerCorteMeta_(sh9);
   const frescura = calcularFrescura_(c1, c9, hoy, L);
   const max1 = frescura.rep1.max, max9 = frescura.rep9.max;
+  const vigenciaHasta = vigenciaReportes_(frescura);
 
   const factor = cfgNum_('FACTOR_TASA_MORATORIA', 2);
   const baseEfectiva = cfgStr_('BASE_MORATORIOS', 'NOMINAL').toUpperCase() === 'EFECTIVA';
@@ -200,6 +236,7 @@ function calcularCola_() {
       key: key, linea: linea, cliente: (contacto && contacto.cliente) || nombreRep1 || (x9 ? String(x9[REP9.NOMBRE] || '') : ''),
       nombreRep1: nombreRep1, moneda: moneda1, fechaNominal: c.nominal, fechaPago: c.pago, diasHabiles: dh,
       estado: estado, accion: accion, programadaPara: programadaPara, nota: nota,
+      calendario: calendarioAvisos_(c.pago, dh, reg, dias, hoy, vigenciaHasta),
       previo: reg.previo, vispera: reg.vispera, reenvios: reg.reenvios, ultimo: reg.ultimo,
       bloqueos: bloqueos, alertas: alertas, destinatarios: destinatarios, cuentaSTP: contacto ? contacto.stp : '',
       tasaContrato: tasaContrato, tasaMoratoria: tasaMoratoria, diasProy: Math.max(0, diasProy),
@@ -208,7 +245,7 @@ function calcularCola_() {
     };
   });
 
-  return { ok: true, hoy: hoy, esHabil: esHabil_(hoy), fechaSimulada: fechaSimulada_(), frescura: frescura,
+  return { ok: true, hoy: hoy, esHabil: esHabil_(hoy), fechaSimulada: fechaSimulada_(), frescura: frescura, vigenciaHasta: vigenciaHasta,
            dias: dias, longitud: L, items: items, stats: estadisticas_(items), advertencias: advertencias.slice(0, 50) };
 }
 
