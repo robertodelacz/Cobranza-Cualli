@@ -205,12 +205,22 @@ function guardarCache_(tipo, rows, meta) {
   });
   salida.forEach(r => { control += esRep1 ? num_(r[REP1.IMPORTE]) : num_(r[REP9.SALDO_TOTAL]); });
 
+  // Rep1: las cuotas del archivo anterior que este archivo ya no cubre y que siguen
+  // pendientes se conservan, para no perder sus avisos. Las que caen dentro del rango
+  // de este archivo se reemplazan (si ya no vienen, se pagaron o cambiaron).
+  let conservadas = [];
+  if (esRep1) conservadas = cuotasPendientesAnteriores_(sh, n, minK, maxK);
+  const grabar = conservadas.length ? salida.concat(conservadas).sort((a, b) => {
+    const ka = fechaKeyDeHoja_(a[REP1.FECHA_VENC]) || '', kb = fechaKeyDeHoja_(b[REP1.FECHA_VENC]) || '';
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  }) : salida;
+
   const last = sh.getLastRow();
   if (last > 4) sh.getRange(5, 1, last - 4, sh.getMaxColumns()).clearContent();
   sh.getRange(4, 1, 1, n).setValues([headers]);
-  sh.getRange(5, 1, salida.length, n).setValues(salida);
-  if (esRep1) sh.getRange(5, 1, salida.length, 1).setNumberFormat('dd/MM/yyyy');
-  else sh.getRange(5, 5, salida.length, 2).setNumberFormat('dd/MM/yyyy');
+  sh.getRange(5, 1, grabar.length, n).setValues(grabar);
+  if (esRep1) sh.getRange(5, 1, grabar.length, 1).setNumberFormat('dd/MM/yyyy');
+  else sh.getRange(5, 5, grabar.length, 2).setNumberFormat('dd/MM/yyyy');
 
   const rango = (meta && meta.rangoDesde && meta.rangoHasta) ? (meta.rangoDesde + ' a ' + meta.rangoHasta) : '';
   sh.getRange(2, 1, 1, 10).setValues([['Fecha de carga:', "'" + ahora, 'Cargado por:', usuario, 'Corte:', corteId,
@@ -219,8 +229,28 @@ function guardarCache_(tipo, rows, meta) {
   [1, 3, 5, 7, 9].forEach(c => sh.getRange(2, c).setFontWeight('bold'));
 
   registrarCorte_(esRep1 ? 'Rep1' : 'Rep9', corteId, ahora, usuario, (meta && meta.archivo) || '', salida.length, minK, maxK, rango, round2_(control));
+  const cons = conservadas.map(r => fechaKeyDeHoja_(r[REP1.FECHA_VENC])).filter(Boolean).sort();
   return { ok: true, tipo: tipo, corteId: corteId, filas: salida.length, fechaHora: ahora, usuario: usuario,
-           fechaMin: minK, fechaMax: maxK, controlTotal: round2_(control) };
+           fechaMin: minK, fechaMax: maxK, controlTotal: round2_(control),
+           conservadas: conservadas.length, conservadasDesde: cons[0] || null, conservadasHasta: cons[cons.length - 1] || null };
+}
+
+/**
+ * Cuotas del Rep1 anterior que se conservan al cargar uno nuevo: su vencimiento cae
+ * fuera de las fechas que trae el archivo nuevo (el archivo no habla de ellas) y su
+ * pago todavía no llega. Lo que cae dentro de esas fechas se reemplaza: si ya no
+ * viene, se pagó o cambió. Devuelve filas ya en el formato de la hoja.
+ */
+function cuotasPendientesAnteriores_(sh, n, minK, maxK) {
+  const previas = leerCache_(sh, n);
+  if (!previas.length || !minK || !maxK) return [];
+  const hoy = hoyKey_();
+  return previas.filter(r => {
+    const k = fechaKeyDeHoja_(r[REP1.FECHA_VENC]);
+    if (!k || !normLinea_(r[REP1.LINEA])) return false;
+    if (k >= minK && k <= maxK) return false;
+    return habilesEntre_(hoy, siguienteHabil_(k)) > 0;
+  });
 }
 
 function leerCache_(sh, numCols) {

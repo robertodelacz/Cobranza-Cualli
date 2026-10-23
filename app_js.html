@@ -462,7 +462,8 @@ async function guardarCarga(tp) {
   const r = await api('guardarReporte', tp, it.rows, meta);
   if (!r.ok) { it.estado = 'error'; it.error = r.error; repintarCargas(); return; }
   S.carga[tp] = null;
-  toast(REP[tp].n + ' guardado: ' + pl(r.filas, REP[tp].unidad[0], REP[tp].unidad[1]) + '.');
+  toast(REP[tp].n + ' guardado: ' + pl(r.filas, REP[tp].unidad[0], REP[tp].unidad[1]) + '.' +
+    (r.conservadas ? ' Además se conservaron ' + pl(r.conservadas, 'cuota', 'cuotas') + ' del Rep1 anterior que vencen del ' + dma(r.conservadasDesde) + ' al ' + dma(r.conservadasHasta) + ', porque este archivo ya no las cubre.' : ''));
   await terminarCarga();
 }
 
